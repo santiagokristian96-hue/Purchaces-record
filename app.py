@@ -59,16 +59,38 @@ CARPETA_ADJUNTOS.mkdir(parents=True, exist_ok=True)
 # ------------------------------------
 # FUNCIONES BÁSICAS Y CONSULTA TASA
 # ------------------------------------
-@st.cache_data(ttl=1800)
+@st.cache_data(ttl=600)
 def obtener_tasa_usdt_online() -> float:
+    # 1. Consulta directa a la API oficial de Binance P2P (USDT / VES)
     try:
+        url = "https://p2p.binance.com/bapi/c2c/v2/friendly/c2c/adv/search"
         headers = {
-            "User-Agent": (
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/120.0.0.0 Safari/537.36"
-            )
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+            "Content-Type": "application/json",
         }
+        payload = {
+            "asset": "USDT",
+            "fiat": "VES",
+            "merchantCheck": False,
+            "page": 1,
+            "payTypes": [],
+            "publisherType": None,
+            "rows": 5,
+            "tradeType": "BUY",
+        }
+        res = requests.post(url, json=payload, headers=headers, timeout=5)
+        if res.status_code == 200:
+            data = res.json()
+            if data.get("data"):
+                precios = [float(adv["adv"]["price"]) for adv in data["data"]]
+                if precios:
+                    return round(sum(precios) / len(precios), 2)
+    except Exception:
+        pass
+
+    # 2. Respaldo secundario: alcambio.app
+    try:
+        headers = {"User-Agent": "Mozilla/5.0"}
         res = requests.get("https://alcambio.app/", headers=headers, timeout=5)
         if res.status_code == 200:
             soup = BeautifulSoup(res.content, "html.parser")
@@ -86,7 +108,8 @@ def obtener_tasa_usdt_online() -> float:
                         return float(rate.get("rate", 0))
     except Exception:
         pass
-    return 850.00
+
+    return 100.00
 
 
 def cargar_datos():
@@ -108,11 +131,14 @@ def obtener_o_crear_semana(
         if sem["numero"] == num_semana:
             return sem
 
-    if not datos["semanas"]:
+    # Considerar solo las semanas registradas desde la 41 en adelante
+    semanas_validas = [s for s in datos["semanas"] if s["numero"] >= 41]
+
+    if not semanas_validas:
         remanente = ahorro_inicial
     else:
-        previa = datos["semanas"][-1]
-        tasa = st.session_state.get("tasa_usdt", 850.0)
+        previa = semanas_validas[-1]
+        tasa = st.session_state.get("tasa_usdt", 100.00)
         gastado_usdt = previa["total_gastado"] / tasa if tasa > 0 else 0
         remanente = previa["presupuesto_disponible"] - gastado_usdt
 
@@ -142,13 +168,14 @@ datos = cargar_datos()
 # ------------------------------------
 st.sidebar.title("⚙️ Configuración")
 st.sidebar.markdown(
-    f"🪙 **Tasa USDT:** `Bs. {st.session_state['tasa_usdt']:.2f}`"
+    f"🪙 **Tasa USDT (Binance P2P):** `Bs. {st.session_state['tasa_usdt']:.2f}`"
 )
 
-semanas_existentes = [s["numero"] for s in datos.get("semanas", [])] or [1]
+# Filtramos la selección para que comience mínimo en la Semana 41
+semanas_existentes = [s["numero"] for s in datos.get("semanas", []) if s["numero"] >= 41] or [41]
 num_semana = st.sidebar.number_input(
     "Seleccionar Semana:",
-    min_value=1,
+    min_value=41,
     value=int(semanas_existentes[-1]),
     step=1,
 )
@@ -156,7 +183,7 @@ num_semana = st.sidebar.number_input(
 semana_actual = obtener_o_crear_semana(datos, num_semana)
 
 st.sidebar.markdown("---")
-st.sidebar.caption("💡 Tasa obtenida de **alcambio.app**")
+st.sidebar.caption("💡 Tasa obtenida en tiempo real de **Binance P2P**")
 
 # ------------------------------------
 # CABECERA Y PANEL DE MÉTRICAS
@@ -242,7 +269,7 @@ with tab1:
 
         if precio_bs > 0 and tasa_actual > 0:
             st.caption(
-                f"Équivalente estimado: **{precio_bs / tasa_actual:.2f} USDT**"
+                f"Equivalente estimado: **{precio_bs / tasa_actual:.2f} USDT**"
             )
 
         btn_guardar = st.form_submit_button("💾 Registrar Compra")
@@ -387,7 +414,7 @@ with tab4:
                 st.success(f"Tasa fijada en Bs. {tasa_manual:.2f}")
                 st.rerun()
         with col_b2:
-            if st.button("🔄 Actualizar de alcambio.app"):
+            if st.button("🔄 Sincronizar con Binance P2P"):
                 st.session_state["tasa_usdt"] = obtener_tasa_usdt_online()
-                st.success("Tasa sincronizada online.")
+                st.success("Tasa actualizada desde Binance P2P.")
                 st.rerun()
