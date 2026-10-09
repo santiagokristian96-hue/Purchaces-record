@@ -78,7 +78,7 @@ def save_optimized_file(uploaded_file, destination_path: Path):
 
 
 # Helper function to generate Weekly Budget Report PDF
-def generate_weekly_pdf(week_num, base_budget, rollover, total_spent_ves, rate_usdt, expenses):
+def generate_weekly_pdf(week_num, base_budget, rollover, total_spent_ves, total_spent_usdt, rate_usdt, expenses):
     pdf = FPDF()
     pdf.add_page()
     pdf.set_auto_page_break(auto=True, margin=15)
@@ -102,7 +102,6 @@ def generate_weekly_pdf(week_num, base_budget, rollover, total_spent_ves, rate_u
     pdf.set_text_color(0, 0, 0)
     pdf.set_font('Helvetica', '', 10)
     
-    total_spent_usdt = total_spent_ves / rate_usdt if rate_usdt > 0 else 0
     available_usdt = (base_budget + rollover) - total_spent_usdt
     available_ves = available_usdt * rate_usdt
     
@@ -110,15 +109,15 @@ def generate_weekly_pdf(week_num, base_budget, rollover, total_spent_ves, rate_u
         ("Weekly Base Budget:", f"{base_budget:.2f} USDT"),
         ("Rollover / Savings:", f"{rollover:.2f} USDT"),
         ("Total Available Budget:", f"{(base_budget + rollover):.2f} USDT"),
-        ("Exchange Rate (Binance P2P):", f"VES {rate_usdt:.2f}"),
+        ("Current Exchange Rate (Binance P2P):", f"VES {rate_usdt:.2f}"),
         ("Total Spent (VES):", f"VES {total_spent_ves:.2f}"),
-        ("Total Spent (USDT):", f"{total_spent_usdt:.2f} USDT"),
+        ("Total Spent (USDT - Frozen at Purchase):", f"{total_spent_usdt:.2f} USDT"),
         ("Available Balance:", f"{available_usdt:.2f} USDT (VES {available_ves:.2f})"),
     ]
     
     for label, val in summary_items:
         pdf.set_font('Helvetica', 'B', 9)
-        pdf.cell(65, 6, f"  {label}", border='B')
+        pdf.cell(70, 6, f"  {label}", border='B')
         pdf.set_font('Helvetica', '', 9)
         pdf.cell(0, 6, val, border='B', ln=True)
         
@@ -276,9 +275,8 @@ def get_or_create_week(
         rollover = initial_savings
     else:
         prev = valid_weeks[-1]
-        rate = st.session_state.get("tasa_usdt", 100.00)
-        spent_usdt = prev["total_gastado"] / rate if rate > 0 else 0
-        rollover = prev["presupuesto_disponible"] - spent_usdt
+        prev_spent_usdt = sum(g.get("precio_usdt", 0.0) for g in prev.get("gastos", []))
+        rollover = prev["presupuesto_disponible"] - prev_spent_usdt
 
     new_week = {
         "numero": week_num,
@@ -327,14 +325,16 @@ st.sidebar.markdown("---")
 st.sidebar.caption("💡 Rate fetched in real-time from **Binance P2P**")
 
 # ------------------------------------
-# HEADER & METRICS PANEL
+# HEADER & METRICS PANEL (FROZEN USDT LOGIC)
 # ------------------------------------
 st.title("💰 Weekly Budget Record (USDT)")
 
 current_rate = st.session_state["tasa_usdt"]
-total_spent_usdt = (
-    current_week["total_gastado"] / current_rate if current_rate > 0 else 0.0
-)
+
+# Sum exact frozen USDT amounts for each expense
+total_spent_usdt = sum(g.get("precio_usdt", 0.0) for g in current_week["gastos"])
+total_spent_ves = current_week["total_gastado"]
+
 remaining_balance_usdt = current_week["presupuesto_disponible"] - total_spent_usdt
 remaining_balance_ves = remaining_balance_usdt * current_rate
 
@@ -368,7 +368,7 @@ with col3:
     <div class="metric-card">
         <div class="metric-title">Total Spent</div>
         <div class="metric-value" style="color: #ff5555;">{total_spent_usdt:.2f} USDT</div>
-        <div class="metric-title">VES {current_week['total_gastado']:.2f}</div>
+        <div class="metric-title">VES {total_spent_ves:.2f}</div>
     </div>
     """,
         unsafe_allow_html=True,
@@ -421,7 +421,7 @@ with tab1:
 
         if price_ves > 0 and current_rate > 0:
             st.caption(
-                f"Estimated equivalent: **{price_ves / current_rate:.2f} USDT**"
+                f"Estimated equivalent: **{price_ves / current_rate:.2f} USDT** (at current rate VES {current_rate:.2f})"
             )
 
         btn_save = st.form_submit_button("💾 Save Expense")
@@ -440,6 +440,7 @@ with tab1:
                     dest_path = CARPETA_ADJUNTOS / receipt_filename
                     save_optimized_file(receipt_file, dest_path)
 
+                # Freeze USDT price at registration time
                 p_usdt = (
                     round(price_ves / current_rate, 2)
                     if current_rate > 0
@@ -457,7 +458,7 @@ with tab1:
                 save_data(data)
                 st.success(
                     f"✅ Registered '{product_name}' for VES {price_ves:.2f}"
-                    f" ({p_usdt:.2f} USDT)"
+                    f" ({p_usdt:.2f} USDT - Frozen Rate)"
                 )
                 st.rerun()
 
@@ -471,6 +472,7 @@ with tab2:
         base_budget=float(current_week["presupuesto_base"]),
         rollover=float(current_week["remanente_anterior"]),
         total_spent_ves=float(current_week["total_gastado"]),
+        total_spent_usdt=float(total_spent_usdt),
         rate_usdt=float(current_rate),
         expenses=current_week["gastos"],
     )
@@ -489,10 +491,7 @@ with tab2:
     else:
         table_data = []
         for i, g in enumerate(current_week["gastos"], 1):
-            p_usdt = g.get(
-                "precio_usdt",
-                g["precio"] / current_rate if current_rate > 0 else 0,
-            )
+            p_usdt = g.get("precio_usdt", 0.0)
             table_data.append(
                 {
                     "#": i,
@@ -660,77 +659,3 @@ with tab4:
             for i, g in enumerate(current_week["gastos"])
         ]
         selected_expense_delete = st.selectbox(
-            "Select expense to delete:",
-            options=expense_options_delete,
-            key="select_delete_expense",
-        )
-
-        if st.button("🗑️ Delete Selected Expense", type="primary"):
-            idx_del = expense_options_delete.index(selected_expense_delete)
-            deleted_expense = current_week["gastos"].pop(idx_del)
-            current_week["total_gastado"] -= deleted_expense["precio"]
-            if current_week["total_gastado"] < 0:
-                current_week["total_gastado"] = 0.0
-
-            if deleted_expense.get("factura"):
-                receipt_path = CARPETA_ADJUNTOS / deleted_expense["factura"]
-                if receipt_path.exists():
-                    try:
-                        receipt_path.unlink()
-                    except Exception:
-                        pass
-
-            save_data(data)
-            st.success(
-                f"🗑️ Successfully removed '{deleted_expense['producto']}'."
-            )
-            st.rerun()
-
-# --- TAB 5: FINANCIAL SETTINGS ---
-with tab5:
-    st.subheader("⚙️ Financial Settings")
-
-    col_a, col_b = st.columns(2)
-    with col_a:
-        st.markdown("##### 💵 Budget & Rollover")
-        new_budget = st.number_input(
-            "Weekly Budget ($ USDT):",
-            min_value=0.0,
-            value=float(current_week["presupuesto_base"]),
-            step=5.0,
-        )
-        new_rollover = st.number_input(
-            "Rollover / Savings ($ USDT):",
-            min_value=0.0,
-            value=float(current_week["remanente_anterior"]),
-            step=5.0,
-        )
-
-        if st.button("Save Budget Changes"):
-            current_week["presupuesto_base"] = new_budget
-            current_week["remanente_anterior"] = new_rollover
-            current_week["presupuesto_disponible"] = new_budget + new_rollover
-            save_data(data)
-            st.success("✅ Budget and savings updated.")
-            st.rerun()
-
-    with col_b:
-        st.markdown("##### 🪙 USDT Exchange Rate")
-        manual_rate = st.number_input(
-            "Manual USDT Rate (VES):",
-            min_value=0.1,
-            value=float(st.session_state["tasa_usdt"]),
-            step=1.0,
-        )
-
-        col_b1, col_b2 = st.columns(2)
-        with col_b1:
-            if st.button("Apply Manual Rate"):
-                st.session_state["tasa_usdt"] = manual_rate
-                st.success(f"Rate set to VES {manual_rate:.2f}")
-                st.rerun()
-        with col_b2:
-            if st.button("🔄 Sync with Binance P2P"):
-                st.session_state["tasa_usdt"] = fetch_online_usdt_rate()
-                st.success("Rate updated from Binance P2P.")
-                st.rerun()
