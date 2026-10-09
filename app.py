@@ -12,7 +12,7 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # Web Page Configuration
 st.set_page_config(
-    page_title="USDT Petty Cash Manager",
+    page_title="Weekly Budget Record",
     page_icon="💰",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -77,7 +77,7 @@ def save_optimized_file(uploaded_file, destination_path: Path):
         f.write(uploaded_file.getbuffer())
 
 
-# Helper function to generate Weekly Summary PDF with embedded receipt images
+# Helper function to generate Weekly Budget Report PDF
 def generate_weekly_pdf(week_num, base_budget, rollover, total_spent_ves, rate_usdt, expenses):
     pdf = FPDF()
     pdf.add_page()
@@ -86,7 +86,7 @@ def generate_weekly_pdf(week_num, base_budget, rollover, total_spent_ves, rate_u
     # Header
     pdf.set_font('Helvetica', 'B', 16)
     pdf.set_text_color(14, 17, 23)
-    pdf.cell(0, 10, f"PETTY CASH REPORT - WEEK {week_num}", ln=True, align='C')
+    pdf.cell(0, 10, f"WEEKLY BUDGET REPORT - WEEK {week_num}", ln=True, align='C')
     
     pdf.set_font('Helvetica', 'I', 10)
     pdf.set_text_color(100, 100, 100)
@@ -191,7 +191,7 @@ def generate_weekly_pdf(week_num, base_budget, rollover, total_spent_ves, rate_u
     pdf.ln(6)
     pdf.set_font('Helvetica', 'I', 8)
     pdf.set_text_color(128, 128, 128)
-    pdf.cell(0, 5, f"Report generated on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - Petty Cash Management System", align='C')
+    pdf.cell(0, 5, f"Report generated on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - Weekly Budget Record", align='C')
     
     out = pdf.output(dest='S')
     return out.encode('latin1') if isinstance(out, str) else bytes(out)
@@ -329,7 +329,7 @@ st.sidebar.caption("💡 Rate fetched in real-time from **Binance P2P**")
 # ------------------------------------
 # HEADER & METRICS PANEL
 # ------------------------------------
-st.title("💰 Petty Cash Management System (USDT)")
+st.title("💰 Weekly Budget Record (USDT)")
 
 current_rate = st.session_state["tasa_usdt"]
 total_spent_usdt = (
@@ -476,9 +476,9 @@ with tab2:
     )
     
     st.download_button(
-        label=f"📄 Download Week {week_num} Summary Report (PDF)",
+        label=f"📄 Download Week {week_num} Weekly Budget Report (PDF)",
         data=pdf_bytes,
-        file_name=f"Petty_Cash_Report_Week_{week_num}.pdf",
+        file_name=f"Weekly_Budget_Report_Week_{week_num}.pdf",
         mime="application/pdf",
         key="btn_download_weekly_pdf",
     )
