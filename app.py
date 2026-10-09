@@ -77,7 +77,7 @@ def save_optimized_file(uploaded_file, destination_path: Path):
         f.write(uploaded_file.getbuffer())
 
 
-# Helper function to generate Weekly Summary PDF
+# Helper function to generate Weekly Summary PDF with embedded receipt images
 def generate_weekly_pdf(week_num, base_budget, rollover, total_spent_ves, rate_usdt, expenses):
     pdf = FPDF()
     pdf.add_page()
@@ -156,7 +156,39 @@ def generate_weekly_pdf(week_num, base_budget, rollover, total_spent_ves, rate_u
             pdf.cell(35, 7, p_usdt, border=1)
             pdf.cell(45, 7, receipt_ref, border=1, ln=True)
             
-    pdf.ln(10)
+    # Attached Receipts Images Gallery
+    expenses_with_images = [
+        g for g in expenses 
+        if g.get("factura") and (CARPETA_ADJUNTOS / g["factura"]).exists() and (CARPETA_ADJUNTOS / g["factura"]).suffix.lower() in [".png", ".jpg", ".jpeg"]
+    ]
+    
+    if expenses_with_images:
+        pdf.ln(8)
+        pdf.set_fill_color(30, 34, 45)
+        pdf.set_text_color(255, 255, 255)
+        pdf.set_font('Helvetica', 'B', 11)
+        pdf.cell(0, 8, " ATTACHED RECEIPTS GALLERY", ln=True, fill=True)
+        pdf.ln(4)
+        
+        for idx, g in enumerate(expenses_with_images, 1):
+            rec_path = CARPETA_ADJUNTOS / g["factura"]
+            pdf.set_text_color(0, 0, 0)
+            pdf.set_font('Helvetica', 'B', 10)
+            pdf.cell(0, 6, f"Receipt #{idx}: {g['producto']} (VES {g['precio']:.2f} / {g['precio_usdt']:.2f} USDT)", ln=True)
+            pdf.set_font('Helvetica', 'I', 8)
+            pdf.set_text_color(100, 100, 100)
+            pdf.cell(0, 4, f"File: {g['factura']}", ln=True)
+            pdf.ln(2)
+            
+            try:
+                pdf.image(str(rec_path), w=85)
+            except Exception:
+                pdf.set_font('Helvetica', 'I', 8)
+                pdf.cell(0, 5, "[Image preview unavailable]", ln=True)
+            
+            pdf.ln(6)
+            
+    pdf.ln(6)
     pdf.set_font('Helvetica', 'I', 8)
     pdf.set_text_color(128, 128, 128)
     pdf.cell(0, 5, f"Report generated on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - Petty Cash Management System", align='C')
