@@ -6,6 +6,7 @@ import streamlit as st
 from bs4 import BeautifulSoup
 import urllib3
 from PIL import Image
+from fpdf import FPDF
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -76,12 +77,99 @@ def save_optimized_file(uploaded_file, destination_path: Path):
         f.write(uploaded_file.getbuffer())
 
 
+# Helper function to generate Weekly Summary PDF
+def generate_weekly_pdf(week_num, base_budget, rollover, total_spent_ves, rate_usdt, expenses):
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_auto_page_break(auto=True, margin=15)
+    
+    # Header
+    pdf.set_font('Helvetica', 'B', 16)
+    pdf.set_text_color(14, 17, 23)
+    pdf.cell(0, 10, f"PETTY CASH REPORT - WEEK {week_num}", ln=True, align='C')
+    
+    pdf.set_font('Helvetica', 'I', 10)
+    pdf.set_text_color(100, 100, 100)
+    pdf.cell(0, 6, "Nexxt Global | Financial & Administrative Operations", ln=True, align='C')
+    pdf.ln(6)
+    
+    # Financial Summary Section
+    pdf.set_fill_color(30, 34, 45)
+    pdf.set_text_color(255, 255, 255)
+    pdf.set_font('Helvetica', 'B', 11)
+    pdf.cell(0, 8, " FINANCIAL SUMMARY", ln=True, fill=True)
+    
+    pdf.set_text_color(0, 0, 0)
+    pdf.set_font('Helvetica', '', 10)
+    
+    total_spent_usdt = total_spent_ves / rate_usdt if rate_usdt > 0 else 0
+    available_usdt = (base_budget + rollover) - total_spent_usdt
+    available_ves = available_usdt * rate_usdt
+    
+    summary_items = [
+        ("Weekly Base Budget:", f"{base_budget:.2f} USDT"),
+        ("Rollover / Savings:", f"{rollover:.2f} USDT"),
+        ("Total Available Budget:", f"{(base_budget + rollover):.2f} USDT"),
+        ("Exchange Rate (Binance P2P):", f"VES {rate_usdt:.2f}"),
+        ("Total Spent (VES):", f"VES {total_spent_ves:.2f}"),
+        ("Total Spent (USDT):", f"{total_spent_usdt:.2f} USDT"),
+        ("Available Balance:", f"{available_usdt:.2f} USDT (VES {available_ves:.2f})"),
+    ]
+    
+    for label, val in summary_items:
+        pdf.set_font('Helvetica', 'B', 9)
+        pdf.cell(65, 6, f"  {label}", border='B')
+        pdf.set_font('Helvetica', '', 9)
+        pdf.cell(0, 6, val, border='B', ln=True)
+        
+    pdf.ln(8)
+    
+    # Expenses Breakdown Section
+    pdf.set_fill_color(30, 34, 45)
+    pdf.set_text_color(255, 255, 255)
+    pdf.set_font('Helvetica', 'B', 11)
+    pdf.cell(0, 8, " EXPENSE DETAILS BREAKDOWN", ln=True, fill=True)
+    
+    # Table Headers
+    pdf.set_fill_color(240, 240, 240)
+    pdf.set_text_color(0, 0, 0)
+    pdf.set_font('Helvetica', 'B', 9)
+    pdf.cell(10, 7, "#", border=1, fill=True)
+    pdf.cell(65, 7, "Item / Service", border=1, fill=True)
+    pdf.cell(35, 7, "Price (VES)", border=1, fill=True)
+    pdf.cell(35, 7, "Price (USDT)", border=1, fill=True)
+    pdf.cell(45, 7, "Receipt Reference", border=1, fill=True, ln=True)
+    
+    pdf.set_font('Helvetica', '', 9)
+    if not expenses:
+        pdf.cell(190, 8, "No expenses recorded for this week.", border=1, ln=True, align='C')
+    else:
+        for idx, g in enumerate(expenses, 1):
+            item_name = str(g.get("producto", ""))[:32]
+            p_ves = f"VES {g.get('precio', 0.0):.2f}"
+            p_usdt = f"{g.get('precio_usdt', 0.0):.2f} USDT"
+            receipt_ref = str(g.get("factura", "No receipt") or "No receipt")[:22]
+            
+            pdf.cell(10, 7, str(idx), border=1)
+            pdf.cell(65, 7, item_name, border=1)
+            pdf.cell(35, 7, p_ves, border=1)
+            pdf.cell(35, 7, p_usdt, border=1)
+            pdf.cell(45, 7, receipt_ref, border=1, ln=True)
+            
+    pdf.ln(10)
+    pdf.set_font('Helvetica', 'I', 8)
+    pdf.set_text_color(128, 128, 128)
+    pdf.cell(0, 5, f"Report generated on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - Petty Cash Management System", align='C')
+    
+    out = pdf.output(dest='S')
+    return out.encode('latin1') if isinstance(out, str) else bytes(out)
+
+
 # ------------------------------------
 # FUNCTIONS & EXCHANGE RATE FETCHING
 # ------------------------------------
 @st.cache_data(ttl=600)
 def fetch_online_usdt_rate() -> float:
-    # 1. Primary Source: Official Binance P2P API (USDT / VES)
     try:
         url = "https://p2p.binance.com/bapi/c2c/v2/friendly/c2c/adv/search"
         headers = {
@@ -108,7 +196,6 @@ def fetch_online_usdt_rate() -> float:
     except Exception:
         pass
 
-    # 2. Secondary Fallback Source: alcambio.app
     try:
         headers = {"User-Agent": "Mozilla/5.0"}
         res = requests.get("https://alcambio.app/", headers=headers, timeout=5)
@@ -345,6 +432,26 @@ with tab1:
 # --- TAB 2: SUMMARY & HISTORY ---
 with tab2:
     st.subheader(f"Expense History - Week {week_num}")
+    
+    # EXPORT PDF REPORT BUTTON
+    pdf_bytes = generate_weekly_pdf(
+        week_num=week_num,
+        base_budget=float(current_week["presupuesto_base"]),
+        rollover=float(current_week["remanente_anterior"]),
+        total_spent_ves=float(current_week["total_gastado"]),
+        rate_usdt=float(current_rate),
+        expenses=current_week["gastos"],
+    )
+    
+    st.download_button(
+        label=f"📄 Download Week {week_num} Summary Report (PDF)",
+        data=pdf_bytes,
+        file_name=f"Petty_Cash_Report_Week_{week_num}.pdf",
+        mime="application/pdf",
+        key="btn_download_weekly_pdf",
+    )
+    st.markdown("<br>", unsafe_allow_html=True)
+
     if not current_week["gastos"]:
         st.info("No expenses recorded for this week.")
     else:
