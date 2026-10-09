@@ -5,6 +5,7 @@ import requests
 import streamlit as st
 from bs4 import BeautifulSoup
 import urllib3
+from PIL import Image
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -54,6 +55,25 @@ st.markdown(
 ARCH_DB = Path("caja_chica.json")
 CARPETA_ADJUNTOS = Path("adjuntos")
 CARPETA_ADJUNTOS.mkdir(parents=True, exist_ok=True)
+
+
+# Helper function to save and optimize images/files
+def save_optimized_file(uploaded_file, destination_path: Path):
+    ext = destination_path.suffix.lower()
+    if ext in [".png", ".jpg", ".jpeg"]:
+        try:
+            img = Image.open(uploaded_file)
+            img.thumbnail((800, 800))  # Resize max dimensions to 800px
+            if img.mode in ("RGBA", "P"):
+                img = img.convert("RGB")
+            img.save(destination_path, optimize=True, quality=80)
+            return
+        except Exception:
+            pass
+
+    # Standard save for PDFs or fallback
+    with open(destination_path, "wb") as f:
+        f.write(uploaded_file.getbuffer())
 
 
 # ------------------------------------
@@ -274,7 +294,7 @@ with tab1:
         if receipt_file is not None:
             ext_preview = Path(receipt_file.name).suffix.lower()
             if ext_preview in [".png", ".jpg", ".jpeg"]:
-                st.image(receipt_file, caption="Receipt Preview", width=300)
+                st.image(receipt_file, caption="Receipt Preview", width=200)
 
         if price_ves > 0 and current_rate > 0:
             st.caption(
@@ -291,11 +311,11 @@ with tab1:
             else:
                 receipt_filename = None
                 if receipt_file is not None:
-                    ext = Path(receipt_file.name).suffix
+                    ext = Path(receipt_file.name).suffix.lower()
                     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                     receipt_filename = f"receipt_wk{week_num}_{timestamp}{ext}"
-                    with open(CARPETA_ADJUNTOS / receipt_filename, "wb") as f:
-                        f.write(receipt_file.getbuffer())
+                    dest_path = CARPETA_ADJUNTOS / receipt_filename
+                    save_optimized_file(receipt_file, dest_path)
 
                 p_usdt = (
                     round(price_ves / current_rate, 2)
@@ -371,7 +391,7 @@ with tab2:
                     st.image(
                         str(rec_path),
                         caption=f"Receipt: {rec_filename}",
-                        use_container_width=True,
+                        width=220,  # Compact thumbnail size
                     )
                 elif ext_file == ".pdf":
                     with open(rec_path, "rb") as pdf_file:
@@ -409,7 +429,7 @@ with tab3:
             if r_path_edit.exists():
                 ext_edit = r_path_edit.suffix.lower()
                 if ext_edit in [".png", ".jpg", ".jpeg"]:
-                    st.image(str(r_path_edit), width=280)
+                    st.image(str(r_path_edit), width=200)
                 elif ext_edit == ".pdf":
                     with open(r_path_edit, "rb") as pdf_f:
                         st.download_button(
@@ -460,11 +480,11 @@ with tab3:
                                     old_path.unlink()
                                 except Exception:
                                     pass
-                        ext = Path(edit_receipt_file.name).suffix
+                        ext = Path(edit_receipt_file.name).suffix.lower()
                         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                         receipt_filename = f"receipt_wk{week_num}_{timestamp}{ext}"
-                        with open(CARPETA_ADJUNTOS / receipt_filename, "wb") as f:
-                            f.write(edit_receipt_file.getbuffer())
+                        dest_path = CARPETA_ADJUNTOS / receipt_filename
+                        save_optimized_file(edit_receipt_file, dest_path)
 
                     # Recalculate total spent
                     old_price = target_expense["precio"]
