@@ -8,15 +8,15 @@ import urllib3
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-# Configuración de página web
+# Web Page Configuration
 st.set_page_config(
-    page_title="Gestor de Caja Chica USDT",
+    page_title="USDT Petty Cash Manager",
     page_icon="💰",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
-# Estilos CSS personalizados (Modo Oscuro / Alto contraste)
+# Custom Dark Mode / High Contrast CSS Styles
 st.markdown(
     """
 <style>
@@ -57,11 +57,11 @@ CARPETA_ADJUNTOS.mkdir(parents=True, exist_ok=True)
 
 
 # ------------------------------------
-# FUNCIONES BÁSICAS Y CONSULTA TASA
+# FUNCTIONS & EXCHANGE RATE FETCHING
 # ------------------------------------
 @st.cache_data(ttl=600)
-def obtener_tasa_usdt_online() -> float:
-    # 1. Consulta directa a la API oficial de Binance P2P (USDT / VES)
+def fetch_online_usdt_rate() -> float:
+    # 1. Primary Source: Official Binance P2P API (USDT / VES)
     try:
         url = "https://p2p.binance.com/bapi/c2c/v2/friendly/c2c/adv/search"
         headers = {
@@ -82,13 +82,13 @@ def obtener_tasa_usdt_online() -> float:
         if res.status_code == 200:
             data = res.json()
             if data.get("data"):
-                precios = [float(adv["adv"]["price"]) for adv in data["data"]]
-                if precios:
-                    return round(sum(precios) / len(precios), 2)
+                prices = [float(adv["adv"]["price"]) for adv in data["data"]]
+                if prices:
+                    return round(sum(prices) / len(prices), 2)
     except Exception:
         pass
 
-    # 2. Respaldo secundario: alcambio.app
+    # 2. Secondary Fallback Source: alcambio.app
     try:
         headers = {"User-Agent": "Mozilla/5.0"}
         res = requests.get("https://alcambio.app/", headers=headers, timeout=5)
@@ -103,8 +103,8 @@ def obtener_tasa_usdt_online() -> float:
                     .get("rates", [])
                 )
                 for rate in rates:
-                    nombre = str(rate.get("source", "")).lower()
-                    if "binance" in nombre or "usdt" in nombre:
+                    name = str(rate.get("source", "")).lower()
+                    if "binance" in name or "usdt" in name:
                         return float(rate.get("rate", 0))
     except Exception:
         pass
@@ -112,90 +112,88 @@ def obtener_tasa_usdt_online() -> float:
     return 100.00
 
 
-def cargar_datos():
+def load_data():
     if ARCH_DB.exists():
         with open(ARCH_DB, "r", encoding="utf-8") as f:
             return json.load(f)
     return {"semanas": []}
 
 
-def guardar_datos(datos):
+def save_data(data):
     with open(ARCH_DB, "w", encoding="utf-8") as f:
-        json.dump(datos, f, indent=4, ensure_ascii=False)
+        json.dump(data, f, indent=4, ensure_ascii=False)
 
 
-def obtener_o_crear_semana(
-    datos, num_semana, presupuesto_base=25.0, ahorro_inicial=60.0
+def get_or_create_week(
+    data, week_num, base_budget=25.0, initial_savings=60.0
 ):
-    for sem in datos["semanas"]:
-        if sem["numero"] == num_semana:
+    for sem in data["semanas"]:
+        if sem["numero"] == week_num:
             return sem
 
-    # Considerar solo las semanas registradas desde la 41 en adelante
-    semanas_validas = [s for s in datos["semanas"] if s["numero"] >= 41]
+    valid_weeks = [s for s in data["semanas"] if s["numero"] >= 41]
 
-    if not semanas_validas:
-        remanente = ahorro_inicial
+    if not valid_weeks:
+        rollover = initial_savings
     else:
-        previa = semanas_validas[-1]
-        tasa = st.session_state.get("tasa_usdt", 100.00)
-        gastado_usdt = previa["total_gastado"] / tasa if tasa > 0 else 0
-        remanente = previa["presupuesto_disponible"] - gastado_usdt
+        prev = valid_weeks[-1]
+        rate = st.session_state.get("tasa_usdt", 100.00)
+        spent_usdt = prev["total_gastado"] / rate if rate > 0 else 0
+        rollover = prev["presupuesto_disponible"] - spent_usdt
 
-    nueva = {
-        "numero": num_semana,
-        "presupuesto_base": presupuesto_base,
-        "remanente_anterior": remanente,
-        "presupuesto_disponible": presupuesto_base + remanente,
+    new_week = {
+        "numero": week_num,
+        "presupuesto_base": base_budget,
+        "remanente_anterior": rollover,
+        "presupuesto_disponible": base_budget + rollover,
         "gastos": [],
         "total_gastado": 0.0,
     }
-    datos["semanas"].append(nueva)
-    guardar_datos(datos)
-    return nueva
+    data["semanas"].append(new_week)
+    save_data(data)
+    return new_week
 
 
 # ------------------------------------
-# INICIALIZACIÓN DE ESTADO
+# STATE INITIALIZATION
 # ------------------------------------
 if "tasa_usdt" not in st.session_state:
-    st.session_state["tasa_usdt"] = obtener_tasa_usdt_online()
+    st.session_state["tasa_usdt"] = fetch_online_usdt_rate()
 
-datos = cargar_datos()
+data = load_data()
 
 # ------------------------------------
-# BARRA LATERAL (SIDEBAR)
+# SIDEBAR
 # ------------------------------------
-st.sidebar.title("⚙️ Configuración")
+st.sidebar.title("⚙️ Settings")
 st.sidebar.markdown(
-    f"🪙 **Tasa USDT (Binance P2P):** `Bs. {st.session_state['tasa_usdt']:.2f}`"
+    f"🪙 **USDT Rate (Binance P2P):** `VES {st.session_state['tasa_usdt']:.2f}`"
 )
 
-# Filtramos la selección para que comience mínimo en la Semana 41
-semanas_existentes = [s["numero"] for s in datos.get("semanas", []) if s["numero"] >= 41] or [41]
-num_semana = st.sidebar.number_input(
-    "Seleccionar Semana:",
+existing_weeks = [s["numero"] for s in data.get("semanas", []) if s["numero"] >= 41] or [41]
+week_num = st.sidebar.number_input(
+    "Select Week:",
     min_value=41,
-    value=int(semanas_existentes[-1]),
+    value=int(existing_weeks[-1]),
     step=1,
 )
 
-semana_actual = obtener_o_crear_semana(datos, num_semana)
+current_week = get_or_create_week(data, week_num)
 
 st.sidebar.markdown("---")
-st.sidebar.caption("💡 Tasa obtenida en tiempo real de **Binance P2P**")
+st.sidebar.caption("💡 Rate fetched in real-time from **Binance P2P**")
 
 # ------------------------------------
-# CABECERA Y PANEL DE MÉTRICAS
+# HEADER & METRICS PANEL
 # ------------------------------------
-st.title("💰 Sistema de Caja Chica (USDT)")
+st.title("💰 Petty Cash Management System (USDT)")
 
-tasa_actual = st.session_state["tasa_usdt"]
-total_gastado_usdt = (
-    semana_actual["total_gastado"] / tasa_actual if tasa_actual > 0 else 0.0
+current_rate = st.session_state["tasa_usdt"]
+total_spent_usdt = (
+    current_week["total_gastado"] / current_rate if current_rate > 0 else 0.0
 )
-saldo_restante_usdt = semana_actual["presupuesto_disponible"] - total_gastado_usdt
-saldo_restante_bs = saldo_restante_usdt * tasa_actual
+remaining_balance_usdt = current_week["presupuesto_disponible"] - total_spent_usdt
+remaining_balance_ves = remaining_balance_usdt * current_rate
 
 col1, col2, col3, col4 = st.columns(4)
 
@@ -203,8 +201,8 @@ with col1:
     st.markdown(
         f"""
     <div class="metric-card">
-        <div class="metric-title">Presupuesto Semanal</div>
-        <div class="metric-value">{semana_actual['presupuesto_base']:.2f} USDT</div>
+        <div class="metric-title">Weekly Budget</div>
+        <div class="metric-value">{current_week['presupuesto_base']:.2f} USDT</div>
     </div>
     """,
         unsafe_allow_html=True,
@@ -214,8 +212,8 @@ with col2:
     st.markdown(
         f"""
     <div class="metric-card">
-        <div class="metric-title">Ahorro / Remanente</div>
-        <div class="metric-value">{semana_actual['remanente_anterior']:.2f} USDT</div>
+        <div class="metric-title">Rollover / Savings</div>
+        <div class="metric-value">{current_week['remanente_anterior']:.2f} USDT</div>
     </div>
     """,
         unsafe_allow_html=True,
@@ -225,9 +223,9 @@ with col3:
     st.markdown(
         f"""
     <div class="metric-card">
-        <div class="metric-title">Total Gastado</div>
-        <div class="metric-value" style="color: #ff5555;">{total_gastado_usdt:.2f} USDT</div>
-        <div class="metric-title">Bs. {semana_actual['total_gastado']:.2f}</div>
+        <div class="metric-title">Total Spent</div>
+        <div class="metric-value" style="color: #ff5555;">{total_spent_usdt:.2f} USDT</div>
+        <div class="metric-title">VES {current_week['total_gastado']:.2f}</div>
     </div>
     """,
         unsafe_allow_html=True,
@@ -237,9 +235,9 @@ with col4:
     st.markdown(
         f"""
     <div class="metric-card">
-        <div class="metric-title">Saldo Disponible</div>
-        <div class="metric-value" style="color: #00ff88;">{saldo_restante_usdt:.2f} USDT</div>
-        <div class="metric-sub">Bs. {saldo_restante_bs:.2f}</div>
+        <div class="metric-title">Available Balance</div>
+        <div class="metric-value" style="color: #00ff88;">{remaining_balance_usdt:.2f} USDT</div>
+        <div class="metric-sub">VES {remaining_balance_ves:.2f}</div>
     </div>
     """,
         unsafe_allow_html=True,
@@ -248,160 +246,160 @@ with col4:
 st.markdown("<br>", unsafe_allow_html=True)
 
 # ------------------------------------
-# PESTAÑAS PRINCIPALES
+# MAIN TABS
 # ------------------------------------
 tab1, tab2, tab3, tab4 = st.tabs(
-    ["📝 Registrar Compra", "📊 Resumen Semanal", "↩️ Eliminar Compra", "⚙️ Ajustes"]
+    ["📝 Record Expense", "📊 Weekly Summary", "↩️ Delete Expense", "⚙️ Settings"]
 )
 
-# --- TAB 1: REGISTRAR COMPRA ---
+# --- TAB 1: RECORD EXPENSE ---
 with tab1:
-    st.subheader(f"Registrar Gasto - Semana {num_semana}")
+    st.subheader(f"Record Expense - Week {week_num}")
     with st.form("form_compra", clear_on_submit=True):
-        producto = st.text_input("Nombre del Producto o Servicio:")
-        precio_bs = st.number_input(
-            "Precio en Bolívares (Bs.):", min_value=0.0, step=0.5
+        product_name = st.text_input("Item or Service Name:")
+        price_ves = st.number_input(
+            "Price in Bolivars (VES):", min_value=0.0, step=0.5
         )
-        factura_file = st.file_uploader(
-            "Adjuntar Factura/Comprobante (opcional):",
+        receipt_file = st.file_uploader(
+            "Attach Invoice / Receipt (optional):",
             type=["png", "jpg", "jpeg", "pdf"],
         )
 
-        if precio_bs > 0 and tasa_actual > 0:
+        if price_ves > 0 and current_rate > 0:
             st.caption(
-                f"Equivalente estimado: **{precio_bs / tasa_actual:.2f} USDT**"
+                f"Estimated equivalent: **{price_ves / current_rate:.2f} USDT**"
             )
 
-        btn_guardar = st.form_submit_button("💾 Registrar Compra")
+        btn_save = st.form_submit_button("💾 Save Expense")
 
-        if btn_guardar:
-            if not producto.strip():
-                st.error("Por favor ingresa un nombre para el producto.")
-            elif precio_bs <= 0:
-                st.error("El precio debe ser mayor a 0.")
+        if btn_save:
+            if not product_name.strip():
+                st.error("Please enter a product or service name.")
+            elif price_ves <= 0:
+                st.error("Price must be greater than 0.")
             else:
-                nombre_factura = None
-                if factura_file is not None:
-                    ext = Path(factura_file.name).suffix
+                receipt_filename = None
+                if receipt_file is not None:
+                    ext = Path(receipt_file.name).suffix
                     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                    nombre_factura = f"factura_sem{num_semana}_{timestamp}{ext}"
-                    with open(CARPETA_ADJUNTOS / nombre_factura, "wb") as f:
-                        f.write(factura_file.getbuffer())
+                    receipt_filename = f"receipt_wk{week_num}_{timestamp}{ext}"
+                    with open(CARPETA_ADJUNTOS / receipt_filename, "wb") as f:
+                        f.write(receipt_file.getbuffer())
 
                 p_usdt = (
-                    round(precio_bs / tasa_actual, 2)
-                    if tasa_actual > 0
+                    round(price_ves / current_rate, 2)
+                    if current_rate > 0
                     else 0.0
                 )
-                gasto = {
-                    "producto": producto,
-                    "precio": precio_bs,
+                expense = {
+                    "producto": product_name,
+                    "precio": price_ves,
                     "precio_usdt": p_usdt,
-                    "factura": nombre_factura,
+                    "factura": receipt_filename,
                     "fecha": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 }
-                semana_actual["gastos"].append(gasto)
-                semana_actual["total_gastado"] += precio_bs
-                guardar_datos(datos)
+                current_week["gastos"].append(expense)
+                current_week["total_gastado"] += price_ves
+                save_data(data)
                 st.success(
-                    f"✅ Se registró '{producto}' por Bs. {precio_bs:.2f}"
+                    f"✅ Registered '{product_name}' for VES {price_ves:.2f}"
                     f" ({p_usdt:.2f} USDT)"
                 )
                 st.rerun()
 
-# --- TAB 2: RESUMEN Y HISTORIAL ---
+# --- TAB 2: SUMMARY & HISTORY ---
 with tab2:
-    st.subheader(f"Historial de Compras - Semana {num_semana}")
-    if not semana_actual["gastos"]:
-        st.info("No hay compras registradas en esta semana.")
+    st.subheader(f"Expense History - Week {week_num}")
+    if not current_week["gastos"]:
+        st.info("No expenses recorded for this week.")
     else:
-        tabla = []
-        for i, g in enumerate(semana_actual["gastos"], 1):
+        table_data = []
+        for i, g in enumerate(current_week["gastos"], 1):
             p_usdt = g.get(
                 "precio_usdt",
-                g["precio"] / tasa_actual if tasa_actual > 0 else 0,
+                g["precio"] / current_rate if current_rate > 0 else 0,
             )
-            tabla.append(
+            table_data.append(
                 {
                     "#": i,
-                    "Producto": g["producto"],
-                    "Precio (Bs.)": f"Bs. {g['precio']:.2f}",
-                    "Precio (USDT)": f"{p_usdt:.2f} USDT",
-                    "Factura": (
-                        g["factura"] if g.get("factura") else "Sin adjunto"
+                    "Item / Service": g["producto"],
+                    "Price (VES)": f"VES {g['precio']:.2f}",
+                    "Price (USDT)": f"{p_usdt:.2f} USDT",
+                    "Receipt": (
+                        g["factura"] if g.get("factura") else "No attachment"
                     ),
-                    "Fecha": g["fecha"],
+                    "Date & Time": g["fecha"],
                 }
             )
-        st.dataframe(tabla, use_container_width=True)
+        st.dataframe(table_data, use_container_width=True)
 
-# --- TAB 3: ELIMINAR COMPRA ---
+# --- TAB 3: DELETE EXPENSE ---
 with tab3:
-    st.subheader(f"Eliminar Compra Errónea - Semana {num_semana}")
-    if not semana_actual["gastos"]:
-        st.info("No hay gastos registrados en esta semana para eliminar.")
+    st.subheader(f"Delete Incorrect Expense - Week {week_num}")
+    if not current_week["gastos"]:
+        st.info("No expenses recorded for this week to delete.")
     else:
-        opciones_gastos = [
-            f"{i+1}. {g['producto']} (Bs. {g['precio']:.2f})"
-            for i, g in enumerate(semana_actual["gastos"])
+        expense_options = [
+            f"{i+1}. {g['producto']} (VES {g['precio']:.2f})"
+            for i, g in enumerate(current_week["gastos"])
         ]
-        seleccion = st.selectbox(
-            "Selecciona la compra a eliminar:", opciones=opciones_gastos
+        selected_expense = st.selectbox(
+            "Select expense to delete:", options=expense_options
         )
 
-        if st.button("🗑️ Eliminar Compra Seleccionada", type="primary"):
-            idx = opciones_gastos.index(seleccion)
-            gasto_borrado = semana_actual["gastos"].pop(idx)
-            semana_actual["total_gastado"] -= gasto_borrado["precio"]
-            if semana_actual["total_gastado"] < 0:
-                semana_actual["total_gastado"] = 0.0
+        if st.button("🗑️ Delete Selected Expense", type="primary"):
+            idx = expense_options.index(selected_expense)
+            deleted_expense = current_week["gastos"].pop(idx)
+            current_week["total_gastado"] -= deleted_expense["precio"]
+            if current_week["total_gastado"] < 0:
+                current_week["total_gastado"] = 0.0
 
-            if gasto_borrado.get("factura"):
-                ruta_f = CARPETA_ADJUNTOS / gasto_borrado["factura"]
-                if ruta_f.exists():
+            if deleted_expense.get("factura"):
+                receipt_path = CARPETA_ADJUNTOS / deleted_expense["factura"]
+                if receipt_path.exists():
                     try:
-                        ruta_f.unlink()
+                        receipt_path.unlink()
                     except Exception:
                         pass
 
-            guardar_datos(datos)
+            save_data(data)
             st.success(
-                f"🗑️ Se eliminó '{gasto_borrado['producto']}' correctamente."
+                f"🗑️ Successfully removed '{deleted_expense['producto']}'."
             )
             st.rerun()
 
-# --- TAB 4: AJUSTES DE PRESUPUESTO Y TASA ---
+# --- TAB 4: FINANCIAL SETTINGS ---
 with tab4:
-    st.subheader("⚙️ Configuración Financiera")
+    st.subheader("⚙️ Financial Settings")
 
     col_a, col_b = st.columns(2)
     with col_a:
-        st.markdown("##### 💵 Presupuesto y Ahorro")
-        nuevo_pres = st.number_input(
-            "Presupuesto Semanal ($ USDT):",
+        st.markdown("##### 💵 Budget & Rollover")
+        new_budget = st.number_input(
+            "Weekly Budget ($ USDT):",
             min_value=0.0,
-            value=float(semana_actual["presupuesto_base"]),
+            value=float(current_week["presupuesto_base"]),
             step=5.0,
         )
-        nuevo_ahorro = st.number_input(
-            "Remanente / Ahorro ($ USDT):",
+        new_rollover = st.number_input(
+            "Rollover / Savings ($ USDT):",
             min_value=0.0,
-            value=float(semana_actual["remanente_anterior"]),
+            value=float(current_week["remanente_anterior"]),
             step=5.0,
         )
 
-        if st.button("Guardar Cambios de Presupuesto"):
-            semana_actual["presupuesto_base"] = nuevo_pres
-            semana_actual["remanente_anterior"] = nuevo_ahorro
-            semana_actual["presupuesto_disponible"] = nuevo_pres + nuevo_ahorro
-            guardar_datos(datos)
-            st.success("✅ Presupuesto y ahorro actualizados.")
+        if st.button("Save Budget Changes"):
+            current_week["presupuesto_base"] = new_budget
+            current_week["remanente_anterior"] = new_rollover
+            current_week["presupuesto_disponible"] = new_budget + new_rollover
+            save_data(data)
+            st.success("✅ Budget and savings updated.")
             st.rerun()
 
     with col_b:
-        st.markdown("##### 🪙 Tasa USDT")
-        tasa_manual = st.number_input(
-            "Tasa USDT Manual (Bs.):",
+        st.markdown("##### 🪙 USDT Exchange Rate")
+        manual_rate = st.number_input(
+            "Manual USDT Rate (VES):",
             min_value=0.1,
             value=float(st.session_state["tasa_usdt"]),
             step=1.0,
@@ -409,12 +407,12 @@ with tab4:
 
         col_b1, col_b2 = st.columns(2)
         with col_b1:
-            if st.button("Aplicar Tasa Manual"):
-                st.session_state["tasa_usdt"] = tasa_manual
-                st.success(f"Tasa fijada en Bs. {tasa_manual:.2f}")
+            if st.button("Apply Manual Rate"):
+                st.session_state["tasa_usdt"] = manual_rate
+                st.success(f"Rate set to VES {manual_rate:.2f}")
                 st.rerun()
         with col_b2:
-            if st.button("🔄 Sincronizar con Binance P2P"):
-                st.session_state["tasa_usdt"] = obtener_tasa_usdt_online()
-                st.success("Tasa actualizada desde Binance P2P.")
+            if st.button("🔄 Sync with Binance P2P"):
+                st.session_state["tasa_usdt"] = fetch_online_usdt_rate()
+                st.success("Rate updated from Binance P2P.")
                 st.rerun()
