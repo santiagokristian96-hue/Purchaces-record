@@ -64,7 +64,7 @@ def save_optimized_file(uploaded_file, destination_path: Path):
     if ext in [".png", ".jpg", ".jpeg"]:
         try:
             img = Image.open(uploaded_file)
-            img.thumbnail((800, 800))  # Resize max dimensions to 800px
+            img.thumbnail((800, 800))
             if img.mode in ("RGBA", "P"):
                 img = img.convert("RGB")
             img.save(destination_path, optimize=True, quality=80)
@@ -72,7 +72,6 @@ def save_optimized_file(uploaded_file, destination_path: Path):
         except Exception:
             pass
 
-    # Standard save for PDFs or fallback
     with open(destination_path, "wb") as f:
         f.write(uploaded_file.getbuffer())
 
@@ -325,13 +324,12 @@ st.sidebar.markdown("---")
 st.sidebar.caption("💡 Rate fetched in real-time from **Binance P2P**")
 
 # ------------------------------------
-# HEADER & METRICS PANEL (FROZEN USDT LOGIC)
+# HEADER & METRICS PANEL
 # ------------------------------------
 st.title("💰 Weekly Budget Record (USDT)")
 
 current_rate = st.session_state["tasa_usdt"]
 
-# Sum exact frozen USDT amounts for each expense
 total_spent_usdt = sum(g.get("precio_usdt", 0.0) for g in current_week["gastos"])
 total_spent_ves = current_week["total_gastado"]
 
@@ -440,7 +438,6 @@ with tab1:
                     dest_path = CARPETA_ADJUNTOS / receipt_filename
                     save_optimized_file(receipt_file, dest_path)
 
-                # Freeze USDT price at registration time
                 p_usdt = (
                     round(price_ves / current_rate, 2)
                     if current_rate > 0
@@ -466,7 +463,6 @@ with tab1:
 with tab2:
     st.subheader(f"Expense History - Week {week_num}")
     
-    # EXPORT PDF REPORT BUTTON
     pdf_bytes = generate_weekly_pdf(
         week_num=week_num,
         base_budget=float(current_week["presupuesto_base"]),
@@ -506,7 +502,6 @@ with tab2:
             )
         st.dataframe(table_data, use_container_width=True)
 
-        # RECEIPT VIEWER SECTION
         expenses_with_receipts = [
             g for g in current_week["gastos"] if g.get("factura")
         ]
@@ -659,3 +654,77 @@ with tab4:
             for i, g in enumerate(current_week["gastos"])
         ]
         selected_expense_delete = st.selectbox(
+            "Select expense to delete:",
+            options=expense_options_delete,
+            key="select_delete_expense",
+        )
+
+        if st.button("🗑️ Delete Selected Expense", type="primary"):
+            idx_del = expense_options_delete.index(selected_expense_delete)
+            deleted_expense = current_week["gastos"].pop(idx_del)
+            current_week["total_gastado"] -= deleted_expense["precio"]
+            if current_week["total_gastado"] < 0:
+                current_week["total_gastado"] = 0.0
+
+            if deleted_expense.get("factura"):
+                receipt_path = CARPETA_ADJUNTOS / deleted_expense["factura"]
+                if receipt_path.exists():
+                    try:
+                        receipt_path.unlink()
+                    except Exception:
+                        pass
+
+            save_data(data)
+            st.success(
+                f"🗑️ Successfully removed '{deleted_expense['producto']}'."
+            )
+            st.rerun()
+
+# --- TAB 5: FINANCIAL SETTINGS ---
+with tab5:
+    st.subheader("⚙️ Financial Settings")
+
+    col_a, col_b = st.columns(2)
+    with col_a:
+        st.markdown("##### 💵 Budget & Rollover")
+        new_budget = st.number_input(
+            "Weekly Budget ($ USDT):",
+            min_value=0.0,
+            value=float(current_week["presupuesto_base"]),
+            step=5.0,
+        )
+        new_rollover = st.number_input(
+            "Rollover / Savings ($ USDT):",
+            min_value=0.0,
+            value=float(current_week["remanente_anterior"]),
+            step=5.0,
+        )
+
+        if st.button("Save Budget Changes"):
+            current_week["presupuesto_base"] = new_budget
+            current_week["remanente_anterior"] = new_rollover
+            current_week["presupuesto_disponible"] = new_budget + new_rollover
+            save_data(data)
+            st.success("✅ Budget and savings updated.")
+            st.rerun()
+
+    with col_b:
+        st.markdown("##### 🪙 USDT Exchange Rate")
+        manual_rate = st.number_input(
+            "Manual USDT Rate (VES):",
+            min_value=0.1,
+            value=float(st.session_state["tasa_usdt"]),
+            step=1.0,
+        )
+
+        col_b1, col_b2 = st.columns(2)
+        with col_b1:
+            if st.button("Apply Manual Rate"):
+                st.session_state["tasa_usdt"] = manual_rate
+                st.success(f"Rate set to VES {manual_rate:.2f}")
+                st.rerun()
+        with col_b2:
+            if st.button("🔄 Sync with Binance P2P"):
+                st.session_state["tasa_usdt"] = fetch_online_usdt_rate()
+                st.success("Rate updated from Binance P2P.")
+                st.rerun()
