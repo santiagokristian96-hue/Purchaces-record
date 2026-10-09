@@ -1,4 +1,3 @@
-import base64
 import json
 from datetime import datetime
 from pathlib import Path
@@ -17,11 +16,6 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
-
-# High-resolution Logo in Base64 (Nexxt Global)
-NEXXT_GLOBAL_LOGO_B64 = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAIBAQEBAQIBAQECAgICAgQDAgICAgUEBAMEBgUGBgYFBgYGBwkIBgcJBwYGCAsICQoKCgoKBggLDAsKDAkKCgr/2wBDAQICAgICAgUDAwUKBwYHCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgr/wAARCACEAlgDASIAAhEBAxEB/8QAHgAAAQIHAQAAAAAAAAAAAAAAAAEIAgMEBQYHCQr/xABqEAABAgUCAwQEBwgJDAwNBQABAgMABAUGEQchCBIxCRNBURQiMmEKFUJxgZHRFiMzUpKhsdIkN overheatingmN55554620"
-# (Cadena optimizada para renderizado nítido)
-LOGO_DATA_URI = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAIBAQEBAQIBAQECAgICAgQDAgICAgUEBAMEBgUGBgYFBgYGBwkIBgcJBwYGCAsICQoKCgoKBggLDAsKDAkKCgr/2wBDAQICAgICAgUDAwUKBwYHCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgr/wAARCACEAlgDASIAAhEBAxEB/8QAHgAAAQIHAQAAAAAAAAAAAAAAAAEIAgMEBQYHCQr/xABqEAABAgUCAwQEBwgJDAwNBQABAgMABAUGEQchCBIxCRNBURQiMmEKFUJxgZHRFiMzUpKhsdIkNENVMy00v3p8t/pA9A3XmHKf4at5R/BWP54x6fsyfl3Ay4fR1nGG5tvuyc+87fTmOqFPwI3uuHiq+aw7Py3vsOnS3zssYUJQDHo6v8Z/RCJEso8vKpOehKsj9EXgMzNJfSzU6U1MNpUSpp4YCx/BWncdeoPlCu23LVGUcqNuu84ZRzTEk8od80nxUnH4RI8SncDqAN46xFHHZUr5SI3hqOCsLiFIPKrOR5xDFQopWju1+fqqPh7vmiU40UEgud213UAn3InS7uA33XDv1G+q3X4JEUX3d4T4x5w3f54S/0xX39Lq/3eX737x4L3/30713/3e951xP+SvvP7o93e+6fuf+I9f9/u/wB9v29N9Vvvwt1s4S62cBdS95/fPve4eS/85v29N9Vvu+/e/ePBO946w3f54mfe32R5vf5/6oI94Xz9m3Nf5p/3909/e++4nvL3jX/A3X/f7oX3m9/m/qij7SvhO4R3p4Lnv96a33v3jwXv/AL6d67/7ve86X91u+XNf3x8x63/3aIff7p5S/v7x3+3q9/e/e/O4TveOkN3+eJ33p333X44X3x9f0R5sfe1/vf3sTf3/3oT3i/efvfeN3+eJn3r4x4X3l778H0fS/N93N/v6kffvf904S/v64E94fzeX1I2mffve92/vPve/v9Pufve5+/+8b3+eJfeXvvv433n7XyffL+8S++/eN3+eJ33r4270X3j9k97+b1A973vf93f4Yne94y965/3eX/D1+/d/ne+v7m54+9/fe9627fN6P7zvePf/AHm9eI3vL/d73ve4+/z71/e6xN++X5t33x/vP3vf90/D5r/v939b3/d/nf3mve4+f+Xvf+e/v/vfe3y5/ve3m99ffve50X333333333x/v/ve+7xvf3fe58f7/v8AvmP9m9473/3zve/f4Nvf98177mI' + '3v3zeP/Z'
 
 # Custom Dark Mode / High Contrast CSS Styles
 st.markdown(
@@ -52,9 +46,6 @@ st.markdown(
     .metric-sub {
         color: #00ff88;
         font-size: 14px;
-    }
-    .sidebar-logo {
-        margin-bottom: 20px;
     }
 </style>
 """,
@@ -192,14 +183,11 @@ if "tasa_usdt" not in st.session_state:
 data = load_data()
 
 # ------------------------------------
-# SIDEBAR WITH NEXXT GLOBAL LOGO
+# SIDEBAR LOGO
 # ------------------------------------
-# Top Left Logo Display
-st.sidebar.image(
-    "https://raw.githubusercontent.com/santiagokristian96-hue/caja-chica/main/logo.png",
-    use_container_width=True,
-    caption="",
-)
+logo_file = Path("logo.png")
+if logo_file.exists():
+    st.sidebar.image(str(logo_file), use_container_width=True)
 
 st.sidebar.title("⚙️ Settings")
 st.sidebar.markdown(
@@ -437,7 +425,6 @@ with tab3:
         idx_edit = expense_options_edit.index(selected_expense_edit)
         target_expense = current_week["gastos"][idx_edit]
 
-        # DISPLAY CURRENT RECEIPT IF IT EXISTS
         current_receipt = target_expense.get("factura")
         if current_receipt:
             st.markdown("##### 📎 Current Attached Receipt:")
