@@ -248,8 +248,14 @@ st.markdown("<br>", unsafe_allow_html=True)
 # ------------------------------------
 # MAIN TABS
 # ------------------------------------
-tab1, tab2, tab3, tab4 = st.tabs(
-    ["📝 Record Expense", "📊 Weekly Summary", "↩️ Delete Expense", "⚙️ Settings"]
+tab1, tab2, tab3, tab4, tab5 = st.tabs(
+    [
+        "📝 Record Expense",
+        "📊 Weekly Summary",
+        "✏️ Edit Expense",
+        "↩️ Delete Expense",
+        "⚙️ Settings",
+    ]
 )
 
 # --- TAB 1: RECORD EXPENSE ---
@@ -333,23 +339,121 @@ with tab2:
             )
         st.dataframe(table_data, use_container_width=True)
 
-# --- TAB 3: DELETE EXPENSE ---
+# --- TAB 3: EDIT EXPENSE ---
 with tab3:
+    st.subheader(f"Edit Expense - Week {week_num}")
+    if not current_week["gastos"]:
+        st.info("No expenses recorded for this week to edit.")
+    else:
+        expense_options_edit = [
+            f"{i+1}. {g['producto']} (VES {g['precio']:.2f})"
+            for i, g in enumerate(current_week["gastos"])
+        ]
+        selected_expense_edit = st.selectbox(
+            "Select expense to edit:",
+            options=expense_options_edit,
+            key="select_edit_expense",
+        )
+
+        idx_edit = expense_options_edit.index(selected_expense_edit)
+        target_expense = current_week["gastos"][idx_edit]
+
+        with st.form("form_edit_compra"):
+            edit_product_name = st.text_input(
+                "Item or Service Name:", value=target_expense["producto"]
+            )
+            edit_price_ves = st.number_input(
+                "Price in Bolivars (VES):",
+                min_value=0.0,
+                value=float(target_expense["precio"]),
+                step=0.5,
+            )
+
+            current_receipt = target_expense.get("factura")
+            if current_receipt:
+                st.caption(f"📎 Current receipt: **{current_receipt}**")
+            else:
+                st.caption("📎 Current receipt: **No attachment**")
+
+            edit_receipt_file = st.file_uploader(
+                "Replace Invoice / Receipt (optional):",
+                type=["png", "jpg", "jpeg", "pdf"],
+                key="uploader_edit_receipt",
+            )
+
+            if edit_price_ves > 0 and current_rate > 0:
+                st.caption(
+                    f"New estimated equivalent: **{edit_price_ves / current_rate:.2f} USDT**"
+                )
+
+            btn_update = st.form_submit_button("💾 Save Changes")
+
+            if btn_update:
+                if not edit_product_name.strip():
+                    st.error("Please enter a product or service name.")
+                elif edit_price_ves <= 0:
+                    st.error("Price must be greater than 0.")
+                else:
+                    receipt_filename = target_expense.get("factura")
+
+                    # Handle file replacement if a new file is uploaded
+                    if edit_receipt_file is not None:
+                        if receipt_filename:
+                            old_path = CARPETA_ADJUNTOS / receipt_filename
+                            if old_path.exists():
+                                try:
+                                    old_path.unlink()
+                                except Exception:
+                                    pass
+                        ext = Path(edit_receipt_file.name).suffix
+                        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                        receipt_filename = f"receipt_wk{week_num}_{timestamp}{ext}"
+                        with open(CARPETA_ADJUNTOS / receipt_filename, "wb") as f:
+                            f.write(edit_receipt_file.getbuffer())
+
+                    # Recalculate total spent
+                    old_price = target_expense["precio"]
+                    current_week["total_gastado"] = (
+                        current_week["total_gastado"] - old_price + edit_price_ves
+                    )
+                    if current_week["total_gastado"] < 0:
+                        current_week["total_gastado"] = 0.0
+
+                    p_usdt = (
+                        round(edit_price_ves / current_rate, 2)
+                        if current_rate > 0
+                        else 0.0
+                    )
+
+                    # Update expense data
+                    target_expense["producto"] = edit_product_name
+                    target_expense["precio"] = edit_price_ves
+                    target_expense["precio_usdt"] = p_usdt
+                    target_expense["factura"] = receipt_filename
+
+                    save_data(data)
+                    st.success(f"✅ Successfully updated '{edit_product_name}'.")
+                    st.rerun()
+
+# --- TAB 4: DELETE EXPENSE ---
+with tab4:
     st.subheader(f"Delete Incorrect Expense - Week {week_num}")
     if not current_week["gastos"]:
         st.info("No expenses recorded for this week to delete.")
     else:
-        expense_options = [
+        expense_options_delete = [
             f"{i+1}. {g['producto']} (VES {g['precio']:.2f})"
             for i, g in enumerate(current_week["gastos"])
         ]
-        selected_expense = st.selectbox(
-            "Select expense to delete:", options=expense_options
+        selected_expense_delete = st.selectbox(
+            "Select expense to delete:",
+            options=expense_options_delete,
+            key="select_delete_expense",
         )
 
         if st.button("🗑️ Delete Selected Expense", type="primary"):
-            idx = expense_options.index(selected_expense)
-            deleted_expense = current_week["gastos"].pop(idx)
+            idx_del = expense_options_delete.index(selected_expense_delete)
+            deleted_expense = current_week["gastos"].pop(idx_del)
             current_week["total_gastado"] -= deleted_expense["precio"]
             if current_week["total_gastado"] < 0:
                 current_week["total_gastado"] = 0.0
@@ -368,8 +472,8 @@ with tab3:
             )
             st.rerun()
 
-# --- TAB 4: FINANCIAL SETTINGS ---
-with tab4:
+# --- TAB 5: FINANCIAL SETTINGS ---
+with tab5:
     st.subheader("⚙️ Financial Settings")
 
     col_a, col_b = st.columns(2)
