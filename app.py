@@ -454,4 +454,124 @@ with tab3:
                     # Handle file replacement if a new file is uploaded
                     if edit_receipt_file is not None:
                         if receipt_filename:
-                            old_path =
+                            old_path = CARPETA_ADJUNTOS / receipt_filename
+                            if old_path.exists():
+                                try:
+                                    old_path.unlink()
+                                except Exception:
+                                    pass
+                        ext = Path(edit_receipt_file.name).suffix
+                        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                        receipt_filename = f"receipt_wk{week_num}_{timestamp}{ext}"
+                        with open(CARPETA_ADJUNTOS / receipt_filename, "wb") as f:
+                            f.write(edit_receipt_file.getbuffer())
+
+                    # Recalculate total spent
+                    old_price = target_expense["precio"]
+                    current_week["total_gastado"] = (
+                        current_week["total_gastado"] - old_price + edit_price_ves
+                    )
+                    if current_week["total_gastado"] < 0:
+                        current_week["total_gastado"] = 0.0
+
+                    p_usdt = (
+                        round(edit_price_ves / current_rate, 2)
+                        if current_rate > 0
+                        else 0.0
+                    )
+
+                    # Update expense data
+                    target_expense["producto"] = edit_product_name
+                    target_expense["precio"] = edit_price_ves
+                    target_expense["precio_usdt"] = p_usdt
+                    target_expense["factura"] = receipt_filename
+
+                    save_data(data)
+                    st.success(f"✅ Successfully updated '{edit_product_name}'.")
+                    st.rerun()
+
+# --- TAB 4: DELETE EXPENSE ---
+with tab4:
+    st.subheader(f"Delete Incorrect Expense - Week {week_num}")
+    if not current_week["gastos"]:
+        st.info("No expenses recorded for this week to delete.")
+    else:
+        expense_options_delete = [
+            f"{i+1}. {g['producto']} (VES {g['precio']:.2f})"
+            for i, g in enumerate(current_week["gastos"])
+        ]
+        selected_expense_delete = st.selectbox(
+            "Select expense to delete:",
+            options=expense_options_delete,
+            key="select_delete_expense",
+        )
+
+        if st.button("🗑️ Delete Selected Expense", type="primary"):
+            idx_del = expense_options_delete.index(selected_expense_delete)
+            deleted_expense = current_week["gastos"].pop(idx_del)
+            current_week["total_gastado"] -= deleted_expense["precio"]
+            if current_week["total_gastado"] < 0:
+                current_week["total_gastado"] = 0.0
+
+            if deleted_expense.get("factura"):
+                receipt_path = CARPETA_ADJUNTOS / deleted_expense["factura"]
+                if receipt_path.exists():
+                    try:
+                        receipt_path.unlink()
+                    except Exception:
+                        pass
+
+            save_data(data)
+            st.success(
+                f"🗑️ Successfully removed '{deleted_expense['producto']}'."
+            )
+            st.rerun()
+
+# --- TAB 5: FINANCIAL SETTINGS ---
+with tab5:
+    st.subheader("⚙️ Financial Settings")
+
+    col_a, col_b = st.columns(2)
+    with col_a:
+        st.markdown("##### 💵 Budget & Rollover")
+        new_budget = st.number_input(
+            "Weekly Budget ($ USDT):",
+            min_value=0.0,
+            value=float(current_week["presupuesto_base"]),
+            step=5.0,
+        )
+        new_rollover = st.number_input(
+            "Rollover / Savings ($ USDT):",
+            min_value=0.0,
+            value=float(current_week["remanente_anterior"]),
+            step=5.0,
+        )
+
+        if st.button("Save Budget Changes"):
+            current_week["presupuesto_base"] = new_budget
+            current_week["remanente_anterior"] = new_rollover
+            current_week["presupuesto_disponible"] = new_budget + new_rollover
+            save_data(data)
+            st.success("✅ Budget and savings updated.")
+            st.rerun()
+
+    with col_b:
+        st.markdown("##### 🪙 USDT Exchange Rate")
+        manual_rate = st.number_input(
+            "Manual USDT Rate (VES):",
+            min_value=0.1,
+            value=float(st.session_state["tasa_usdt"]),
+            step=1.0,
+        )
+
+        col_b1, col_b2 = st.columns(2)
+        with col_b1:
+            if st.button("Apply Manual Rate"):
+                st.session_state["tasa_usdt"] = manual_rate
+                st.success(f"Rate set to VES {manual_rate:.2f}")
+                st.rerun()
+        with col_b2:
+            if st.button("🔄 Sync with Binance P2P"):
+                st.session_state["tasa_usdt"] = fetch_online_usdt_rate()
+                st.success("Rate updated from Binance P2P.")
+                st.rerun()
