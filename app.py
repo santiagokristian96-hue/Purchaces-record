@@ -184,16 +184,16 @@ if "input_week_number" not in st.session_state:
 data = load_data()
 
 # ------------------------------------
-# SIDEBAR
+# SIDEBAR (LEFT PANEL)
 # ------------------------------------
 st.sidebar.title("⚙️ Settings")
 st.sidebar.markdown(
-    f"🪙 **USDT Rate (Binance P2P):** `VES {st.session_state['tasa_usdt']:.2f}`"
+    f"🪙 **USDT Rate:** `VES {st.session_state['tasa_usdt']:.2f}`"
 )
 
-st.sidebar.caption(f"📅 Real-world Current Week: **Week {real_current_week}**")
+st.sidebar.caption(f"📅 Real Current Week: **Week {real_current_week}**")
 
-if st.sidebar.button("📅 Sync to Current Real Week"):
+if st.sidebar.button("📅 Sync to Real Current Week"):
     st.session_state["input_week_number"] = real_current_week
     st.rerun()
 
@@ -206,15 +206,88 @@ week_num = st.sidebar.number_input(
 
 current_week = get_or_create_week(data, week_num)
 
+# --- SIDEBAR PENDING PURCHASES / INVENTORY ---
 st.sidebar.markdown("---")
-st.sidebar.caption("💡 Rate fetched in real-time from **Binance P2P**")
+st.sidebar.subheader("🛒 Pending Purchases")
+
+with st.sidebar.expander("➕ Add Pending Item"):
+    with st.form("sb_add_form", clear_on_submit=True):
+        sb_item_name = st.text_input("Item Name:")
+        sb_item_cost = st.number_input("Est. USDT:", min_value=0.0, step=5.0)
+        sb_item_prio = st.selectbox("Priority:", ["High", "Medium", "Low"])
+        sb_submitted = st.form_submit_button("Add to List")
+        if sb_submitted:
+            if sb_item_name.strip():
+                if "pending_purchases" not in data:
+                    data["pending_purchases"] = []
+                data["pending_purchases"].append(
+                    {
+                        "item": sb_item_name,
+                        "est_cost": sb_item_cost,
+                        "priority": sb_item_prio,
+                        "notes": "",
+                        "date_added": datetime.now().strftime(
+                            "%Y-%m-%d %H:%M:%S"
+                        ),
+                    }
+                )
+                save_data(data)
+                st.success("Added!")
+                st.rerun()
+
+pending_items = data.get("pending_purchases", [])
+if not pending_items:
+    st.sidebar.caption("No pending items.")
+else:
+    for idx, p_item in enumerate(pending_items):
+        prio_color = (
+            "🔴"
+            if p_item["priority"] == "High"
+            else "🟡"
+            if p_item["priority"] == "Medium"
+            else "🟢"
+        )
+        cost_str = (
+            f" ({p_item['est_cost']:.2f} USDT)"
+            if p_item.get("est_cost", 0) > 0
+            else ""
+        )
+        st.sidebar.markdown(f"{prio_color} **{p_item['item']}**{cost_str}")
+
+    sb_del_options = [
+        f"{i+1}. {it['item']}" for i, it in enumerate(pending_items)
+    ]
+    sb_selected_del = st.sidebar.selectbox(
+        "Remove item:", options=sb_del_options, key="sb_del_select"
+    )
+    if st.sidebar.button("🗑️ Remove Selected Item"):
+        idx_to_del = sb_del_options.index(sb_selected_del)
+        data["pending_purchases"].pop(idx_to_del)
+        save_data(data)
+        st.success("Removed!")
+        st.rerun()
+
+st.sidebar.markdown("---")
+st.sidebar.caption("💡 Rate fetched from **Binance P2P**")
 
 # ------------------------------------
-# HEADER & METRICS PANEL
+# HEADER & PROMINENT EXCHANGE RATE BANNER
 # ------------------------------------
 st.title("💰 Petty Cash Management System (USDT)")
 
 current_rate = st.session_state["tasa_usdt"]
+
+# Prominent Exchange Rate Banner on Main Page
+st.markdown(
+    f"""
+    <div style="background: linear-gradient(135deg, #1e222d 0%, #2b3245 100%); border: 2px solid #00d2ff; border-radius: 12px; padding: 15px; text-align: center; margin-bottom: 20px; box-shadow: 0 4px 12px rgba(0,0,0,0.5);">
+        <div style="color: #8b9bb4; font-size: 14px; font-weight: 600; text-transform: uppercase; letter-spacing: 1.5px;">Live USDT / VES Exchange Rate (Binance P2P)</div>
+        <div style="color: #00d2ff; font-size: 32px; font-weight: bold; margin-top: 4px;">VES {current_rate:.2f}</div>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+
 total_spent_usdt = (
     current_week["total_gastado"] / current_rate if current_rate > 0 else 0.0
 )
@@ -274,13 +347,12 @@ st.markdown("<br>", unsafe_allow_html=True)
 # ------------------------------------
 # MAIN TABS
 # ------------------------------------
-tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(
+tab1, tab2, tab3, tab4, tab5 = st.tabs(
     [
         "📝 Record Expense",
         "📊 Weekly Summary",
         "✏️ Edit Expense",
         "↩️ Delete Expense",
-        "🛒 Future Purchases",
         "⚙️ Settings",
     ]
 )
@@ -549,76 +621,8 @@ with tab4:
             )
             st.rerun()
 
-# --- TAB 5: FUTURE PURCHASES / PENDING LIST ---
+# --- TAB 5: FINANCIAL SETTINGS ---
 with tab5:
-    st.subheader("🛒 Future & Pending Purchases List")
-    st.markdown("Add and manage items, materials, or services needed for upcoming weeks.")
-
-    with st.form("form_future_purchase", clear_on_submit=True):
-        item_name = st.text_input("Item or Need Description:")
-        est_cost_usdt = st.number_input("Estimated Cost (USDT - optional):", min_value=0.0, step=5.0)
-        priority = st.selectbox("Priority Level:", options=["High", "Medium", "Low"])
-        notes = st.text_area("Additional Notes / Link / Details:")
-
-        btn_add_future = st.form_submit_button("➕ Add to Pending List")
-
-        if btn_add_future:
-            if not item_name.strip():
-                st.error("Please enter a description for the item.")
-            else:
-                new_future_item = {
-                    "item": item_name,
-                    "est_cost": est_cost_usdt,
-                    "priority": priority,
-                    "notes": notes,
-                    "date_added": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                }
-                if "pending_purchases" not in data:
-                    data["pending_purchases"] = []
-                data["pending_purchases"].append(new_future_item)
-                save_data(data)
-                st.success(f"✅ Added '{item_name}' to future purchases list.")
-                st.rerun()
-
-    st.markdown("---")
-    st.subheader("📋 Pending Items Inventory")
-    
-    pending_list = data.get("pending_purchases", [])
-    if not pending_list:
-        st.info("No pending future purchases registered yet.")
-    else:
-        table_future = []
-        for i, item in enumerate(pending_list, 1):
-            table_future.append({
-                "#": i,
-                "Item Description": item["item"],
-                "Est. Cost (USDT)": f"{item['est_cost']:.2f} USDT" if item["est_cost"] > 0 else "Not specified",
-                "Priority": item["priority"],
-                "Notes": item["notes"] if item["notes"] else "N/A",
-                "Added Date": item["date_added"]
-            })
-        st.dataframe(table_future, use_container_width=True)
-
-        st.markdown("##### Remove or Resolve Item")
-        future_options_del = [
-            f"{i+1}. {item['item']} ({item['priority']} priority)"
-            for i, item in enumerate(pending_list)
-        ]
-        selected_future_del = st.selectbox(
-            "Select item to remove (purchased or canceled):",
-            options=future_options_del,
-            key="select_future_del"
-        )
-
-        if st.button("🗑️ Remove Selected Item", type="primary"):
-            idx_fut = future_options_del.index(selected_future_del)
-            removed_item = data["pending_purchases"].pop(idx_fut)
-            save_data(data)
-            st.success(f"🗑️ Successfully removed '{removed_item['item']}' from the pending list.")
-            st.rerun()
-
-# --- TAB 6: FINANCIAL SETTINGS ---
-with tab6:
     st.subheader("⚙️ Financial Settings")
 
     col_a, col_b = st.columns(2)
@@ -636,22 +640,22 @@ with tab6:
             value=float(current_week["remanente_anterior"]),
             step=5.0,
         )
-        
+
         current_funded_status = current_week.get("budget_funded", True)
         new_funded_status = st.checkbox(
             "✅ Weekly Budget Funded / Received this week",
             value=current_funded_status,
-            help="Uncheck this if the company did not fund the budget this week so it won't be added automatically."
+            help="Uncheck this if the company did not fund the budget this week so it won't be added automatically.",
         )
 
         if st.button("Save Budget Changes"):
             current_week["presupuesto_base"] = new_budget
             current_week["remanente_anterior"] = new_rollover
             current_week["budget_funded"] = new_funded_status
-            
+
             active_base = new_budget if new_funded_status else 0.0
             current_week["presupuesto_disponible"] = active_base + new_rollover
-            
+
             save_data(data)
             st.success("✅ Budget and funding settings updated.")
             st.rerun()
@@ -660,19 +664,3 @@ with tab6:
         st.markdown("##### 🪙 USDT Exchange Rate")
         manual_rate = st.number_input(
             "Manual USDT Rate (VES):",
-            min_value=0.1,
-            value=float(st.session_state["tasa_usdt"]),
-            step=1.0,
-        )
-
-        col_b1, col_b2 = st.columns(2)
-        with col_b1:
-            if st.button("Apply Manual Rate"):
-                st.session_state["tasa_usdt"] = manual_rate
-                st.success(f"Rate set to VES {manual_rate:.2f}")
-                st.rerun()
-        with col_b2:
-            if st.button("🔄 Sync with Binance P2P"):
-                st.session_state["tasa_usdt"] = fetch_online_usdt_rate()
-                st.success("Rate updated from Binance P2P.")
-                st.rerun()
