@@ -175,8 +175,11 @@ def get_or_create_week(
 
 
 # ------------------------------------
-# STATE INITIALIZATION
+# STATE & AUTHENTICATION INITIALIZATION
 # ------------------------------------
+if "authenticated" not in st.session_state:
+    st.session_state["authenticated"] = False
+
 if "tasa_usdt" not in st.session_state:
     st.session_state["tasa_usdt"] = fetch_online_usdt_rate()
 
@@ -188,8 +191,105 @@ if "input_week_number" not in st.session_state:
 data = load_data()
 
 # ------------------------------------
-# SIDEBAR (LEFT PANEL)
+# LOGIN SCREEN (IF NOT AUTHENTICATED)
 # ------------------------------------
+if not st.session_state["authenticated"]:
+    st.title("🔒 Petty Cash Management System")
+    st.subheader("Welcome to Nextglobal Cash Portal")
+
+    col_login, col_pending = st.columns([1, 1.2], gap="large")
+
+    # LEFT COLUMN: LOGIN FORM
+    with col_login:
+        st.markdown("### 🔑 System Access")
+        with st.form("login_form"):
+            st.text_input("Username:", value="Nextglobal", disabled=True)
+            password_input = st.text_input("Password:", type="password")
+            btn_login = st.form_submit_button("🔓 Log In")
+
+            if btn_login:
+                if password_input == "Ng90071":
+                    st.session_state["authenticated"] = True
+                    st.success("✅ Login successful!")
+                    st.rerun()
+                else:
+                    st.error("❌ Incorrect password. Please try again.")
+
+    # RIGHT COLUMN: PUBLIC PENDING PURCHASES PORTAL
+    with col_pending:
+        st.markdown("### 🛒 Pending Purchases List")
+        st.caption("View and register items or needs before logging into full system.")
+
+        with st.form("public_add_pending", clear_on_submit=True):
+            pub_item_name = st.text_input("Item Name / Need:")
+            pub_item_prio = st.selectbox("Priority Level:", ["High", "Medium", "Low"])
+            pub_add_btn = st.form_submit_button("➕ Add Pending Item")
+
+            if pub_add_btn:
+                if pub_item_name.strip():
+                    if "pending_purchases" not in data:
+                        data["pending_purchases"] = []
+                    data["pending_purchases"].append(
+                        {
+                            "item": pub_item_name,
+                            "priority": pub_item_prio,
+                            "notes": "",
+                            "date_added": datetime.now().strftime(
+                                "%Y-%m-%d %H:%M:%S"
+                            ),
+                        }
+                    )
+                    save_data(data)
+                    st.success(f"Added '{pub_item_name}' to list!")
+                    st.rerun()
+                else:
+                    st.error("Please enter an item name.")
+
+        st.markdown("---")
+        pending_items_pub = data.get("pending_purchases", [])
+        if not pending_items_pub:
+            st.info("No pending items registered yet.")
+        else:
+            table_pub = []
+            for i, p_item in enumerate(pending_items_pub, 1):
+                prio_icon = (
+                    "🔴"
+                    if p_item["priority"] == "High"
+                    else "🟡"
+                    if p_item["priority"] == "Medium"
+                    else "🟢"
+                )
+                table_pub.append(
+                    {
+                        "#": i,
+                        "Item": p_item["item"],
+                        "Priority": f"{prio_icon} {p_item['priority']}",
+                        "Date Added": p_item["date_added"],
+                    }
+                )
+            st.dataframe(table_pub, use_container_width=True)
+
+            pub_del_options = [
+                f"{i+1}. {it['item']}" for i, it in enumerate(pending_items_pub)
+            ]
+            pub_selected_del = st.selectbox(
+                "Remove resolved item:", options=pub_del_options, key="pub_del_select"
+            )
+            if st.button("🗑️ Remove Selected Item"):
+                idx_to_del = pub_del_options.index(pub_selected_del)
+                removed = data["pending_purchases"].pop(idx_to_del)
+                save_data(data)
+                st.success(f"Removed '{removed['item']}'.")
+                st.rerun()
+
+    st.stop()  # Stop script execution here if user is not authenticated
+
+
+# ------------------------------------
+# MAIN APPLICATION (AUTHENTICATED USER)
+# ------------------------------------
+
+# SIDEBAR (LEFT PANEL)
 st.sidebar.title("⚙️ Settings")
 st.sidebar.markdown(
     f"🪙 **USDT Rate:** `VES {st.session_state['tasa_usdt']:.2f}`"
@@ -265,7 +365,9 @@ else:
         st.rerun()
 
 st.sidebar.markdown("---")
-st.sidebar.caption("💡 Rate fetched from **Binance P2P**")
+if st.sidebar.button("🚪 Log Out", type="secondary"):
+    st.session_state["authenticated"] = False
+    st.rerun()
 
 # ------------------------------------
 # HEADER & PROMINENT EXCHANGE RATE BANNER
