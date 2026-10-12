@@ -135,6 +135,11 @@ def get_or_create_week(
 ):
     for sem in data["semanas"]:
         if sem["numero"] == week_num:
+            # Asegurar compatibilidad con semanas guardadas anteriormente
+            if "budget_funded" not in sem:
+                sem["budget_funded"] = True
+            active_base = sem["presupuesto_base"] if sem["budget_funded"] else 0.0
+            sem["presupuesto_disponible"] = active_base + sem["remanente_anterior"]
             return sem
 
     valid_weeks = [s for s in data["semanas"] if s["numero"] >= 41]
@@ -151,6 +156,7 @@ def get_or_create_week(
         "numero": week_num,
         "presupuesto_base": base_budget,
         "remanente_anterior": rollover,
+        "budget_funded": True,  # Por defecto activado al crear la semana
         "presupuesto_disponible": base_budget + rollover,
         "gastos": [],
         "total_gastado": 0.0,
@@ -562,13 +568,26 @@ with tab5:
             value=float(current_week["remanente_anterior"]),
             step=5.0,
         )
+        
+        # Checkbox para marcar si se recibió o no el presupuesto esta semana
+        current_funded_status = current_week.get("budget_funded", True)
+        new_funded_status = st.checkbox(
+            "✅ Weekly Budget Funded / Received this week",
+            value=current_funded_status,
+            help="Uncheck this if the company did not fund the budget this week so it won't be added automatically."
+        )
 
         if st.button("Save Budget Changes"):
             current_week["presupuesto_base"] = new_budget
             current_week["remanente_anterior"] = new_rollover
-            current_week["presupuesto_disponible"] = new_budget + new_rollover
+            current_week["budget_funded"] = new_funded_status
+            
+            # Recalcular presupuesto disponible según el estado del checkbox
+            active_base = new_budget if new_funded_status else 0.0
+            current_week["presupuesto_disponible"] = active_base + new_rollover
+            
             save_data(data)
-            st.success("✅ Budget and savings updated.")
+            st.success("✅ Budget and funding settings updated.")
             st.rerun()
 
     with col_b:
@@ -589,5 +608,5 @@ with tab5:
         with col_b2:
             if st.button("🔄 Sync with Binance P2P"):
                 st.session_state["tasa_usdt"] = fetch_online_usdt_rate()
-                st.success("Tasa actualizada desde Binance P2P.")
+                st.success("Rate updated from Binance P2P.")
                 st.rerun()
