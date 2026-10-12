@@ -167,8 +167,9 @@ if "tasa_usdt" not in st.session_state:
     st.session_state["tasa_usdt"] = fetch_online_usdt_rate()
 
 real_current_week = get_current_real_week()
-if "selected_week" not in st.session_state:
-    st.session_state["selected_week"] = real_current_week
+
+if "input_week_number" not in st.session_state:
+    st.session_state["input_week_number"] = real_current_week
 
 data = load_data()
 
@@ -182,19 +183,16 @@ st.sidebar.markdown(
 
 st.sidebar.caption(f"📅 Real-world Current Week: **Week {real_current_week}**")
 
+if st.sidebar.button("📅 Sync to Current Real Week"):
+    st.session_state["input_week_number"] = real_current_week
+    st.rerun()
+
 week_num = st.sidebar.number_input(
     "Select Week:",
     min_value=41,
-    value=int(st.session_state["selected_week"]),
     step=1,
     key="input_week_number",
 )
-
-st.session_state["selected_week"] = week_num
-
-if st.sidebar.button("📅 Sync to Current Real Week"):
-    st.session_state["selected_week"] = real_current_week
-    st.rerun()
 
 current_week = get_or_create_week(data, week_num)
 
@@ -591,5 +589,5 @@ with tab5:
         with col_b2:
             if st.button("🔄 Sync with Binance P2P"):
                 st.session_state["tasa_usdt"] = fetch_online_usdt_rate()
-                st.success("Rate updated from Binance P2P.")
+                st.success("Tasa actualizada desde Binance P2P.")
                 st.rerun()
