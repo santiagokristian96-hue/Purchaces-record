@@ -5,14 +5,12 @@ import requests
 import streamlit as st
 from bs4 import BeautifulSoup
 import urllib3
-from PIL import Image
-from fpdf import FPDF
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # Web Page Configuration
 st.set_page_config(
-    page_title="Weekly Budget Record",
+    page_title="USDT Petty Cash Manager",
     page_icon="💰",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -58,148 +56,12 @@ CARPETA_ADJUNTOS = Path("adjuntos")
 CARPETA_ADJUNTOS.mkdir(parents=True, exist_ok=True)
 
 
-# Helper function to save and optimize images/files
-def save_optimized_file(uploaded_file, destination_path: Path):
-    ext = destination_path.suffix.lower()
-    if ext in [".png", ".jpg", ".jpeg"]:
-        try:
-            img = Image.open(uploaded_file)
-            img.thumbnail((800, 800))
-            if img.mode in ("RGBA", "P"):
-                img = img.convert("RGB")
-            img.save(destination_path, optimize=True, quality=80)
-            return
-        except Exception:
-            pass
-
-    with open(destination_path, "wb") as f:
-        f.write(uploaded_file.getbuffer())
-
-
-# Helper function to generate Weekly Budget Report PDF
-def generate_weekly_pdf(week_num, base_budget, rollover, total_spent_ves, total_spent_usdt, rate_usdt, expenses):
-    pdf = FPDF()
-    pdf.add_page()
-    pdf.set_auto_page_break(auto=True, margin=15)
-    
-    # Header
-    pdf.set_font('Helvetica', 'B', 16)
-    pdf.set_text_color(14, 17, 23)
-    pdf.cell(0, 10, f"WEEKLY BUDGET REPORT - WEEK {week_num}", ln=True, align='C')
-    
-    pdf.set_font('Helvetica', 'I', 10)
-    pdf.set_text_color(100, 100, 100)
-    pdf.cell(0, 6, "Nexxt Global | Financial & Administrative Operations", ln=True, align='C')
-    pdf.ln(6)
-    
-    # Financial Summary Section
-    pdf.set_fill_color(30, 34, 45)
-    pdf.set_text_color(255, 255, 255)
-    pdf.set_font('Helvetica', 'B', 11)
-    pdf.cell(0, 8, " FINANCIAL SUMMARY", ln=True, fill=True)
-    
-    pdf.set_text_color(0, 0, 0)
-    pdf.set_font('Helvetica', '', 10)
-    
-    available_usdt = (base_budget + rollover) - total_spent_usdt
-    available_ves = available_usdt * rate_usdt
-    
-    summary_items = [
-        ("Weekly Base Budget:", f"{base_budget:.2f} USDT"),
-        ("Rollover / Savings:", f"{rollover:.2f} USDT"),
-        ("Total Available Budget:", f"{(base_budget + rollover):.2f} USDT"),
-        ("Current Exchange Rate (Binance P2P):", f"VES {rate_usdt:.2f}"),
-        ("Total Spent (VES):", f"VES {total_spent_ves:.2f}"),
-        ("Total Spent (USDT - Frozen at Purchase):", f"{total_spent_usdt:.2f} USDT"),
-        ("Available Balance:", f"{available_usdt:.2f} USDT (VES {available_ves:.2f})"),
-    ]
-    
-    for label, val in summary_items:
-        pdf.set_font('Helvetica', 'B', 9)
-        pdf.cell(70, 6, f"  {label}", border='B')
-        pdf.set_font('Helvetica', '', 9)
-        pdf.cell(0, 6, val, border='B', ln=True)
-        
-    pdf.ln(8)
-    
-    # Expenses Breakdown Section
-    pdf.set_fill_color(30, 34, 45)
-    pdf.set_text_color(255, 255, 255)
-    pdf.set_font('Helvetica', 'B', 11)
-    pdf.cell(0, 8, " EXPENSE DETAILS BREAKDOWN", ln=True, fill=True)
-    
-    # Table Headers
-    pdf.set_fill_color(240, 240, 240)
-    pdf.set_text_color(0, 0, 0)
-    pdf.set_font('Helvetica', 'B', 9)
-    pdf.cell(10, 7, "#", border=1, fill=True)
-    pdf.cell(65, 7, "Item / Service", border=1, fill=True)
-    pdf.cell(35, 7, "Price (VES)", border=1, fill=True)
-    pdf.cell(35, 7, "Price (USDT)", border=1, fill=True)
-    pdf.cell(45, 7, "Receipt Reference", border=1, fill=True, ln=True)
-    
-    pdf.set_font('Helvetica', '', 9)
-    if not expenses:
-        pdf.cell(190, 8, "No expenses recorded for this week.", border=1, ln=True, align='C')
-    else:
-        for idx, g in enumerate(expenses, 1):
-            item_name = str(g.get("producto", ""))[:32]
-            p_ves = f"VES {g.get('precio', 0.0):.2f}"
-            p_usdt = f"{g.get('precio_usdt', 0.0):.2f} USDT"
-            receipt_ref = str(g.get("factura", "No receipt") or "No receipt")[:22]
-            
-            pdf.cell(10, 7, str(idx), border=1)
-            pdf.cell(65, 7, item_name, border=1)
-            pdf.cell(35, 7, p_ves, border=1)
-            pdf.cell(35, 7, p_usdt, border=1)
-            pdf.cell(45, 7, receipt_ref, border=1, ln=True)
-            
-    # Attached Receipts Images Gallery
-    expenses_with_images = [
-        g for g in expenses 
-        if g.get("factura") and (CARPETA_ADJUNTOS / g["factura"]).exists() and (CARPETA_ADJUNTOS / g["factura"]).suffix.lower() in [".png", ".jpg", ".jpeg"]
-    ]
-    
-    if expenses_with_images:
-        pdf.ln(8)
-        pdf.set_fill_color(30, 34, 45)
-        pdf.set_text_color(255, 255, 255)
-        pdf.set_font('Helvetica', 'B', 11)
-        pdf.cell(0, 8, " ATTACHED RECEIPTS GALLERY", ln=True, fill=True)
-        pdf.ln(4)
-        
-        for idx, g in enumerate(expenses_with_images, 1):
-            rec_path = CARPETA_ADJUNTOS / g["factura"]
-            pdf.set_text_color(0, 0, 0)
-            pdf.set_font('Helvetica', 'B', 10)
-            pdf.cell(0, 6, f"Receipt #{idx}: {g['producto']} (VES {g['precio']:.2f} / {g['precio_usdt']:.2f} USDT)", ln=True)
-            pdf.set_font('Helvetica', 'I', 8)
-            pdf.set_text_color(100, 100, 100)
-            pdf.cell(0, 4, f"File: {g['factura']}", ln=True)
-            pdf.ln(2)
-            
-            try:
-                pdf.image(str(rec_path), w=85)
-            except Exception:
-                pdf.set_font('Helvetica', 'I', 8)
-                pdf.cell(0, 5, "[Image preview unavailable]", ln=True)
-            
-            pdf.ln(6)
-            
-    pdf.ln(6)
-    pdf.set_font('Helvetica', 'I', 8)
-    pdf.set_text_color(128, 128, 128)
-    pdf.cell(0, 5, f"Report generated on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - Weekly Budget Record", align='C')
-    
-    out = pdf.output(dest='S')
-    return out.encode('latin1') if isinstance(out, str) else bytes(out)
-
-
 # ------------------------------------
 # FUNCTIONS & EXCHANGE RATE FETCHING
 # ------------------------------------
 @st.cache_data(ttl=600)
 def fetch_online_usdt_rate() -> float:
+    # 1. Primary Source: Official Binance P2P API (USDT / VES)
     try:
         url = "https://p2p.binance.com/bapi/c2c/v2/friendly/c2c/adv/search"
         headers = {
@@ -226,6 +88,7 @@ def fetch_online_usdt_rate() -> float:
     except Exception:
         pass
 
+    # 2. Secondary Fallback Source: alcambio.app
     try:
         headers = {"User-Agent": "Mozilla/5.0"}
         res = requests.get("https://alcambio.app/", headers=headers, timeout=5)
@@ -247,6 +110,12 @@ def fetch_online_usdt_rate() -> float:
         pass
 
     return 100.00
+
+
+def get_current_real_week() -> int:
+    """Returns current real-world ISO week number (minimum 41)."""
+    current_iso_week = datetime.now().isocalendar()[1]
+    return max(41, current_iso_week)
 
 
 def load_data():
@@ -274,8 +143,9 @@ def get_or_create_week(
         rollover = initial_savings
     else:
         prev = valid_weeks[-1]
-        prev_spent_usdt = sum(g.get("precio_usdt", 0.0) for g in prev.get("gastos", []))
-        rollover = prev["presupuesto_disponible"] - prev_spent_usdt
+        rate = st.session_state.get("tasa_usdt", 100.00)
+        spent_usdt = prev["total_gastado"] / rate if rate > 0 else 0
+        rollover = prev["presupuesto_disponible"] - spent_usdt
 
     new_week = {
         "numero": week_num,
@@ -296,27 +166,35 @@ def get_or_create_week(
 if "tasa_usdt" not in st.session_state:
     st.session_state["tasa_usdt"] = fetch_online_usdt_rate()
 
+real_current_week = get_current_real_week()
+if "selected_week" not in st.session_state:
+    st.session_state["selected_week"] = real_current_week
+
 data = load_data()
 
 # ------------------------------------
-# SIDEBAR LOGO
+# SIDEBAR
 # ------------------------------------
-logo_file = Path("logo.png")
-if logo_file.exists():
-    st.sidebar.image(str(logo_file), use_container_width=True)
-
 st.sidebar.title("⚙️ Settings")
 st.sidebar.markdown(
     f"🪙 **USDT Rate (Binance P2P):** `VES {st.session_state['tasa_usdt']:.2f}`"
 )
 
-existing_weeks = [s["numero"] for s in data.get("semanas", []) if s["numero"] >= 41] or [41]
+st.sidebar.caption(f"📅 Real-world Current Week: **Week {real_current_week}**")
+
 week_num = st.sidebar.number_input(
     "Select Week:",
     min_value=41,
-    value=int(existing_weeks[-1]),
+    value=int(st.session_state["selected_week"]),
     step=1,
+    key="input_week_number",
 )
+
+st.session_state["selected_week"] = week_num
+
+if st.sidebar.button("📅 Sync to Current Real Week"):
+    st.session_state["selected_week"] = real_current_week
+    st.rerun()
 
 current_week = get_or_create_week(data, week_num)
 
@@ -326,13 +204,12 @@ st.sidebar.caption("💡 Rate fetched in real-time from **Binance P2P**")
 # ------------------------------------
 # HEADER & METRICS PANEL
 # ------------------------------------
-st.title("💰 Weekly Budget Record (USDT)")
+st.title("💰 Petty Cash Management System (USDT)")
 
 current_rate = st.session_state["tasa_usdt"]
-
-total_spent_usdt = sum(g.get("precio_usdt", 0.0) for g in current_week["gastos"])
-total_spent_ves = current_week["total_gastado"]
-
+total_spent_usdt = (
+    current_week["total_gastado"] / current_rate if current_rate > 0 else 0.0
+)
 remaining_balance_usdt = current_week["presupuesto_disponible"] - total_spent_usdt
 remaining_balance_ves = remaining_balance_usdt * current_rate
 
@@ -366,7 +243,7 @@ with col3:
     <div class="metric-card">
         <div class="metric-title">Total Spent</div>
         <div class="metric-value" style="color: #ff5555;">{total_spent_usdt:.2f} USDT</div>
-        <div class="metric-title">VES {total_spent_ves:.2f}</div>
+        <div class="metric-title">VES {current_week['total_gastado']:.2f}</div>
     </div>
     """,
         unsafe_allow_html=True,
@@ -415,11 +292,11 @@ with tab1:
         if receipt_file is not None:
             ext_preview = Path(receipt_file.name).suffix.lower()
             if ext_preview in [".png", ".jpg", ".jpeg"]:
-                st.image(receipt_file, caption="Receipt Preview", width=200)
+                st.image(receipt_file, caption="Receipt Preview", width=300)
 
         if price_ves > 0 and current_rate > 0:
             st.caption(
-                f"Estimated equivalent: **{price_ves / current_rate:.2f} USDT** (at current rate VES {current_rate:.2f})"
+                f"Estimated equivalent: **{price_ves / current_rate:.2f} USDT**"
             )
 
         btn_save = st.form_submit_button("💾 Save Expense")
@@ -432,11 +309,11 @@ with tab1:
             else:
                 receipt_filename = None
                 if receipt_file is not None:
-                    ext = Path(receipt_file.name).suffix.lower()
+                    ext = Path(receipt_file.name).suffix
                     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                     receipt_filename = f"receipt_wk{week_num}_{timestamp}{ext}"
-                    dest_path = CARPETA_ADJUNTOS / receipt_filename
-                    save_optimized_file(receipt_file, dest_path)
+                    with open(CARPETA_ADJUNTOS / receipt_filename, "wb") as f:
+                        f.write(receipt_file.getbuffer())
 
                 p_usdt = (
                     round(price_ves / current_rate, 2)
@@ -455,39 +332,22 @@ with tab1:
                 save_data(data)
                 st.success(
                     f"✅ Registered '{product_name}' for VES {price_ves:.2f}"
-                    f" ({p_usdt:.2f} USDT - Frozen Rate)"
+                    f" ({p_usdt:.2f} USDT)"
                 )
                 st.rerun()
 
 # --- TAB 2: SUMMARY & HISTORY ---
 with tab2:
     st.subheader(f"Expense History - Week {week_num}")
-    
-    pdf_bytes = generate_weekly_pdf(
-        week_num=week_num,
-        base_budget=float(current_week["presupuesto_base"]),
-        rollover=float(current_week["remanente_anterior"]),
-        total_spent_ves=float(current_week["total_gastado"]),
-        total_spent_usdt=float(total_spent_usdt),
-        rate_usdt=float(current_rate),
-        expenses=current_week["gastos"],
-    )
-    
-    st.download_button(
-        label=f"📄 Download Week {week_num} Weekly Budget Report (PDF)",
-        data=pdf_bytes,
-        file_name=f"Weekly_Budget_Report_Week_{week_num}.pdf",
-        mime="application/pdf",
-        key="btn_download_weekly_pdf",
-    )
-    st.markdown("<br>", unsafe_allow_html=True)
-
     if not current_week["gastos"]:
         st.info("No expenses recorded for this week.")
     else:
         table_data = []
         for i, g in enumerate(current_week["gastos"], 1):
-            p_usdt = g.get("precio_usdt", 0.0)
+            p_usdt = g.get(
+                "precio_usdt",
+                g["precio"] / current_rate if current_rate > 0 else 0,
+            )
             table_data.append(
                 {
                     "#": i,
@@ -502,6 +362,7 @@ with tab2:
             )
         st.dataframe(table_data, use_container_width=True)
 
+        # RECEIPT VIEWER SECTION
         expenses_with_receipts = [
             g for g in current_week["gastos"] if g.get("factura")
         ]
@@ -528,7 +389,7 @@ with tab2:
                     st.image(
                         str(rec_path),
                         caption=f"Receipt: {rec_filename}",
-                        width=220,
+                        use_container_width=True,
                     )
                 elif ext_file == ".pdf":
                     with open(rec_path, "rb") as pdf_file:
@@ -558,6 +419,7 @@ with tab3:
         idx_edit = expense_options_edit.index(selected_expense_edit)
         target_expense = current_week["gastos"][idx_edit]
 
+        # DISPLAY CURRENT RECEIPT IF IT EXISTS
         current_receipt = target_expense.get("factura")
         if current_receipt:
             st.markdown("##### 📎 Current Attached Receipt:")
@@ -565,7 +427,7 @@ with tab3:
             if r_path_edit.exists():
                 ext_edit = r_path_edit.suffix.lower()
                 if ext_edit in [".png", ".jpg", ".jpeg"]:
-                    st.image(str(r_path_edit), width=200)
+                    st.image(str(r_path_edit), width=280)
                 elif ext_edit == ".pdf":
                     with open(r_path_edit, "rb") as pdf_f:
                         st.download_button(
@@ -607,6 +469,7 @@ with tab3:
                 else:
                     receipt_filename = target_expense.get("factura")
 
+                    # Handle file replacement if a new file is uploaded
                     if edit_receipt_file is not None:
                         if receipt_filename:
                             old_path = CARPETA_ADJUNTOS / receipt_filename
@@ -615,12 +478,13 @@ with tab3:
                                     old_path.unlink()
                                 except Exception:
                                     pass
-                        ext = Path(edit_receipt_file.name).suffix.lower()
+                        ext = Path(edit_receipt_file.name).suffix
                         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                         receipt_filename = f"receipt_wk{week_num}_{timestamp}{ext}"
-                        dest_path = CARPETA_ADJUNTOS / receipt_filename
-                        save_optimized_file(edit_receipt_file, dest_path)
+                        with open(CARPETA_ADJUNTOS / receipt_filename, "wb") as f:
+                            f.write(edit_receipt_file.getbuffer())
 
+                    # Recalculate total spent
                     old_price = target_expense["precio"]
                     current_week["total_gastado"] = (
                         current_week["total_gastado"] - old_price + edit_price_ves
@@ -634,6 +498,7 @@ with tab3:
                         else 0.0
                     )
 
+                    # Update expense data
                     target_expense["producto"] = edit_product_name
                     target_expense["precio"] = edit_price_ves
                     target_expense["precio_usdt"] = p_usdt
