@@ -159,12 +159,6 @@ def get_or_create_week(
         if sem["numero"] == week_num:
             if "budget_funded" not in sem:
                 sem["budget_funded"] = False
-            active_base = (
-                sem["presupuesto_base"] if sem["budget_funded"] else 0.0
-            )
-            sem["presupuesto_disponible"] = (
-                active_base + sem["remanente_anterior"]
-            )
             return sem
 
     valid_weeks = [s for s in data["semanas"] if s["numero"] >= 41]
@@ -175,7 +169,12 @@ def get_or_create_week(
         prev = valid_weeks[-1]
         rate = st.session_state.get("tasa_usdt", 100.00)
         spent_usdt = prev["total_gastado"] / rate if rate > 0 else 0
-        rollover = prev["presupuesto_disponible"] - spent_usdt
+        
+        # Calculate prev available
+        prev_is_funded = prev.get("budget_funded", False)
+        prev_base = prev["presupuesto_base"] if prev_is_funded else 0.0
+        prev_available = prev_base + prev["remanente_anterior"]
+        rollover = prev_available - spent_usdt
 
     new_week = {
         "numero": week_num,
@@ -400,7 +399,36 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# RECALCULATE AVAILABLE BALANCE DYNAMICALLY
+# ------------------------------------
+# FUNDING CONTROL BUTTON (PROCESSED FIRST)
+# ------------------------------------
+is_funded = current_week.get("budget_funded", False)
+
+c_fund1, c_fund2 = st.columns([1, 3])
+
+with c_fund1:
+    if not is_funded:
+        if st.button(f"➕ Fund Week (+{current_week['presupuesto_base']:.2f} USDT)", type="primary", use_container_width=True):
+            current_week["budget_funded"] = True
+            save_data(data)
+            st.rerun()
+    else:
+        if st.button(f"➖ Unfund Week (-{current_week['presupuesto_base']:.2f} USDT)", type="secondary", use_container_width=True):
+            current_week["budget_funded"] = False
+            save_data(data)
+            st.rerun()
+
+with c_fund2:
+    if is_funded:
+        st.info("✅ **Status:** Weekly Budget transferred & added to Available Balance.")
+    else:
+        st.caption("ℹ️ **Status:** Weekly Budget not funded yet. Click the button on the left when you receive the transfer.")
+
+st.markdown("<br>", unsafe_allow_html=True)
+
+# ------------------------------------
+# CALCULATE METRICS AFTER FUNDING ACTION
+# ------------------------------------
 is_funded = current_week.get("budget_funded", False)
 base_amount = current_week["presupuesto_base"] if is_funded else 0.0
 current_week["presupuesto_disponible"] = base_amount + current_week["remanente_anterior"]
@@ -460,32 +488,6 @@ with col4:
     """,
         unsafe_allow_html=True,
     )
-
-# ------------------------------------
-# DIRECT FUNDING CONTROL BUTTON NEAR BALANCE
-# ------------------------------------
-st.markdown("<br>", unsafe_allow_html=True)
-c_fund1, c_fund2 = st.columns([1, 3])
-
-with c_fund1:
-    if not is_funded:
-        if st.button(f"➕ Fund Week (+{current_week['presupuesto_base']:.2f} USDT)", type="primary", use_container_width=True):
-            current_week["budget_funded"] = True
-            save_data(data)
-            st.success(f"Added +{current_week['presupuesto_base']:.2f} USDT to Available Balance!")
-            st.rerun()
-    else:
-        if st.button(f"➖ Unfund Week (-{current_week['presupuesto_base']:.2f} USDT)", type="secondary", use_container_width=True):
-            current_week["budget_funded"] = False
-            save_data(data)
-            st.warning(f"Removed {current_week['presupuesto_base']:.2f} USDT from Available Balance.")
-            st.rerun()
-
-with c_fund2:
-    if is_funded:
-        st.info("✅ **Status:** Weekly Budget has been transferred & added to Available Balance.")
-    else:
-        st.caption("ℹ️ **Status:** Weekly Budget not funded yet. Click the button on the left when you receive the transfer.")
 
 st.markdown("<br>", unsafe_allow_html=True)
 
