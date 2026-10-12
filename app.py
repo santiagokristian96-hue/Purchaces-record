@@ -1,5 +1,6 @@
 import json
 from datetime import datetime
+from pathlib import Path
 import requests
 import streamlit as st
 from bs4 import BeautifulSoup
@@ -137,7 +138,6 @@ def load_data():
     except Exception:
         pass
 
-    # Default structure if empty
     default_data = {"semanas": [], "pending_purchases": []}
     save_data(default_data)
     return default_data
@@ -158,7 +158,7 @@ def get_or_create_week(
     for sem in data["semanas"]:
         if sem["numero"] == week_num:
             if "budget_funded" not in sem:
-                sem["budget_funded"] = True
+                sem["budget_funded"] = False
             active_base = (
                 sem["presupuesto_base"] if sem["budget_funded"] else 0.0
             )
@@ -177,12 +177,13 @@ def get_or_create_week(
         spent_usdt = prev["total_gastado"] / rate if rate > 0 else 0
         rollover = prev["presupuesto_disponible"] - spent_usdt
 
+    # budget_funded inicia en False por defecto para que NO se sume automáticamente
     new_week = {
         "numero": week_num,
         "presupuesto_base": base_budget,
         "remanente_anterior": rollover,
-        "budget_funded": True,
-        "presupuesto_disponible": base_budget + rollover,
+        "budget_funded": False,
+        "presupuesto_disponible": rollover,
         "gastos": [],
         "total_gastado": 0.0,
     }
@@ -502,7 +503,6 @@ with tab1:
                     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                     receipt_filename = f"receipt_wk{week_num}_{timestamp}{ext}"
                     
-                    # Upload file to Supabase Storage Bucket 'receipts'
                     file_bytes = receipt_file.getvalue()
                     supabase.storage.from_("receipts").upload(
                         receipt_filename, file_bytes, file_options={"upsert": "true"}
@@ -712,11 +712,11 @@ with tab4:
             step=5.0,
         )
 
-        current_funded_status = current_week.get("budget_funded", True)
+        current_funded_status = current_week.get("budget_funded", False)
         new_funded_status = st.checkbox(
             "✅ Weekly Budget Funded / Received this week",
             value=current_funded_status,
-            help="Uncheck this if the company did not fund the budget this week so it won't be added automatically.",
+            help="Check this ONLY when the company transfers/funds the budget this week so it gets added to your available balance.",
         )
 
         if st.button("Save Budget Changes"):
