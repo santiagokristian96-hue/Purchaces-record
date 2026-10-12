@@ -122,7 +122,6 @@ def load_data():
     if ARCH_DB.exists():
         with open(ARCH_DB, "r", encoding="utf-8") as f:
             data = json.load(f)
-            # Asegurar estructura base completa
             if "semanas" not in data:
                 data["semanas"] = []
             if "pending_purchases" not in data:
@@ -372,7 +371,6 @@ with tab2:
             )
         st.dataframe(table_data, use_container_width=True)
 
-        # RECEIPT VIEWER SECTION
         expenses_with_receipts = [
             g for g in current_week["gastos"] if g.get("factura")
         ]
@@ -441,4 +439,240 @@ with tab3:
                     with open(r_path_edit, "rb") as pdf_f:
                         st.download_button(
                             label="📄 Download Attached PDF Receipt",
-                            data=pdf
+                            data=pdf_f,
+                            file_name=current_receipt,
+                            mime="application/pdf",
+                        )
+
+        with st.form("form_edit_compra"):
+            edit_product_name = st.text_input(
+                "Item or Service Name:", value=target_expense["producto"]
+            )
+            edit_price_ves = st.number_input(
+                "Price in Bolivars (VES):",
+                min_value=0.0,
+                value=float(target_expense["precio"]),
+                step=0.5,
+            )
+
+            edit_receipt_file = st.file_uploader(
+                "Replace Invoice / Receipt (optional):",
+                type=["png", "jpg", "jpeg", "pdf"],
+                key="uploader_edit_receipt",
+            )
+
+            if edit_price_ves > 0 and current_rate > 0:
+                st.caption(
+                    f"New estimated equivalent: **{edit_price_ves / current_rate:.2f} USDT**"
+                )
+
+            btn_update = st.form_submit_button("💾 Save Changes")
+
+            if btn_update:
+                if not edit_product_name.strip():
+                    st.error("Please enter a product or service name.")
+                elif edit_price_ves <= 0:
+                    st.error("Price must be greater than 0.")
+                else:
+                    receipt_filename = target_expense.get("factura")
+
+                    if edit_receipt_file is not None:
+                        if receipt_filename:
+                            old_path = CARPETA_ADJUNTOS / receipt_filename
+                            if old_path.exists():
+                                try:
+                                    old_path.unlink()
+                                except Exception:
+                                    pass
+                        ext = Path(edit_receipt_file.name).suffix
+                        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                        receipt_filename = f"receipt_wk{week_num}_{timestamp}{ext}"
+                        with open(CARPETA_ADJUNTOS / receipt_filename, "wb") as f:
+                            f.write(edit_receipt_file.getbuffer())
+
+                    old_price = target_expense["precio"]
+                    current_week["total_gastado"] = (
+                        current_week["total_gastado"] - old_price + edit_price_ves
+                    )
+                    if current_week["total_gastado"] < 0:
+                        current_week["total_gastado"] = 0.0
+
+                    p_usdt = (
+                        round(edit_price_ves / current_rate, 2)
+                        if current_rate > 0
+                        else 0.0
+                    )
+
+                    target_expense["producto"] = edit_product_name
+                    target_expense["precio"] = edit_price_ves
+                    target_expense["precio_usdt"] = p_usdt
+                    target_expense["factura"] = receipt_filename
+
+                    save_data(data)
+                    st.success(f"✅ Successfully updated '{edit_product_name}'.")
+                    st.rerun()
+
+# --- TAB 4: DELETE EXPENSE ---
+with tab4:
+    st.subheader(f"Delete Incorrect Expense - Week {week_num}")
+    if not current_week["gastos"]:
+        st.info("No expenses recorded for this week to delete.")
+    else:
+        expense_options_delete = [
+            f"{i+1}. {g['producto']} (VES {g['precio']:.2f})"
+            for i, g in enumerate(current_week["gastos"])
+        ]
+        selected_expense_delete = st.selectbox(
+            "Select expense to delete:",
+            options=expense_options_delete,
+            key="select_delete_expense",
+        )
+
+        if st.button("🗑️ Delete Selected Expense", type="primary"):
+            idx_del = expense_options_delete.index(selected_expense_delete)
+            deleted_expense = current_week["gastos"].pop(idx_del)
+            current_week["total_gastado"] -= deleted_expense["precio"]
+            if current_week["total_gastado"] < 0:
+                current_week["total_gastado"] = 0.0
+
+            if deleted_expense.get("factura"):
+                receipt_path = CARPETA_ADJUNTOS / deleted_expense["factura"]
+                if receipt_path.exists():
+                    try:
+                        receipt_path.unlink()
+                    except Exception:
+                        pass
+
+            save_data(data)
+            st.success(
+                f"🗑️ Successfully removed '{deleted_expense['producto']}'."
+            )
+            st.rerun()
+
+# --- TAB 5: FUTURE PURCHASES / PENDING LIST ---
+with tab5:
+    st.subheader("🛒 Future & Pending Purchases List")
+    st.markdown("Add and manage items, materials, or services needed for upcoming weeks.")
+
+    with st.form("form_future_purchase", clear_on_submit=True):
+        item_name = st.text_input("Item or Need Description:")
+        est_cost_usdt = st.number_input("Estimated Cost (USDT - optional):", min_value=0.0, step=5.0)
+        priority = st.selectbox("Priority Level:", options=["High", "Medium", "Low"])
+        notes = st.text_area("Additional Notes / Link / Details:")
+
+        btn_add_future = st.form_submit_button("➕ Add to Pending List")
+
+        if btn_add_future:
+            if not item_name.strip():
+                st.error("Please enter a description for the item.")
+            else:
+                new_future_item = {
+                    "item": item_name,
+                    "est_cost": est_cost_usdt,
+                    "priority": priority,
+                    "notes": notes,
+                    "date_added": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                }
+                if "pending_purchases" not in data:
+                    data["pending_purchases"] = []
+                data["pending_purchases"].append(new_future_item)
+                save_data(data)
+                st.success(f"✅ Added '{item_name}' to future purchases list.")
+                st.rerun()
+
+    st.markdown("---")
+    st.subheader("📋 Pending Items Inventory")
+    
+    pending_list = data.get("pending_purchases", [])
+    if not pending_list:
+        st.info("No pending future purchases registered yet.")
+    else:
+        table_future = []
+        for i, item in enumerate(pending_list, 1):
+            table_future.append({
+                "#": i,
+                "Item Description": item["item"],
+                "Est. Cost (USDT)": f"{item['est_cost']:.2f} USDT" if item["est_cost"] > 0 else "Not specified",
+                "Priority": item["priority"],
+                "Notes": item["notes"] if item["notes"] else "N/A",
+                "Added Date": item["date_added"]
+            })
+        st.dataframe(table_future, use_container_width=True)
+
+        st.markdown("##### Remove or Resolve Item")
+        future_options_del = [
+            f"{i+1}. {item['item']} ({item['priority']} priority)"
+            for i, item in enumerate(pending_list)
+        ]
+        selected_future_del = st.selectbox(
+            "Select item to remove (purchased or canceled):",
+            options=future_options_del,
+            key="select_future_del"
+        )
+
+        if st.button("🗑️ Remove Selected Item", type="primary"):
+            idx_fut = future_options_del.index(selected_future_del)
+            removed_item = data["pending_purchases"].pop(idx_fut)
+            save_data(data)
+            st.success(f"🗑️ Successfully removed '{removed_item['item']}' from the pending list.")
+            st.rerun()
+
+# --- TAB 6: FINANCIAL SETTINGS ---
+with tab6:
+    st.subheader("⚙️ Financial Settings")
+
+    col_a, col_b = st.columns(2)
+    with col_a:
+        st.markdown("##### 💵 Budget & Rollover")
+        new_budget = st.number_input(
+            "Weekly Budget ($ USDT):",
+            min_value=0.0,
+            value=float(current_week["presupuesto_base"]),
+            step=5.0,
+        )
+        new_rollover = st.number_input(
+            "Rollover / Savings ($ USDT):",
+            min_value=0.0,
+            value=float(current_week["remanente_anterior"]),
+            step=5.0,
+        )
+        
+        current_funded_status = current_week.get("budget_funded", True)
+        new_funded_status = st.checkbox(
+            "✅ Weekly Budget Funded / Received this week",
+            value=current_funded_status,
+            help="Uncheck this if the company did not fund the budget this week so it won't be added automatically."
+        )
+
+        if st.button("Save Budget Changes"):
+            current_week["presupuesto_base"] = new_budget
+            current_week["remanente_anterior"] = new_rollover
+            current_week["budget_funded"] = new_funded_status
+            
+            active_base = new_budget if new_funded_status else 0.0
+            current_week["presupuesto_disponible"] = active_base + new_rollover
+            
+            save_data(data)
+            st.success("✅ Budget and funding settings updated.")
+            st.rerun()
+
+    with col_b:
+        st.markdown("##### 🪙 USDT Exchange Rate")
+        manual_rate = st.number_input(
+            "Manual USDT Rate (VES):",
+            min_value=0.1,
+            value=float(st.session_state["tasa_usdt"]),
+            step=1.0,
+        )
+
+        col_b1, col_b2 = st.columns(2)
+        with col_b1:
+            if st.button("Apply Manual Rate"):
+                st.session_state["tasa_usdt"] = manual_rate
+                st.success(f"Rate set to VES {manual_rate:.2f}")
+                st.rerun()
+        with col_b2:
+            if st.button("🔄 Sync with Binance P2P"):
+                st.session_state["tasa_usdt"] = fetch_online_usdt_rate()
+                st.success("Rate updated from Binance P2P.")
+                st.rerun()
