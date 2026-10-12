@@ -217,7 +217,6 @@ st.sidebar.subheader("🛒 Pending Purchases")
 with st.sidebar.expander("➕ Add Pending Item"):
     with st.form("sb_add_form", clear_on_submit=True):
         sb_item_name = st.text_input("Item Name:")
-        sb_item_cost = st.number_input("Est. USDT:", min_value=0.0, step=5.0)
         sb_item_prio = st.selectbox("Priority:", ["High", "Medium", "Low"])
         sb_submitted = st.form_submit_button("Add to List")
         if sb_submitted:
@@ -227,7 +226,6 @@ with st.sidebar.expander("➕ Add Pending Item"):
                 data["pending_purchases"].append(
                     {
                         "item": sb_item_name,
-                        "est_cost": sb_item_cost,
                         "priority": sb_item_prio,
                         "notes": "",
                         "date_added": datetime.now().strftime(
@@ -251,12 +249,7 @@ else:
             if p_item["priority"] == "Medium"
             else "🟢"
         )
-        cost_str = (
-            f" ({p_item['est_cost']:.2f} USDT)"
-            if p_item.get("est_cost", 0) > 0
-            else ""
-        )
-        st.sidebar.markdown(f"{prio_color} **{p_item['item']}**{cost_str}")
+        st.sidebar.markdown(f"{prio_color} **{p_item['item']}**")
 
     sb_del_options = [
         f"{i+1}. {it['item']}" for i, it in enumerate(pending_items)
