@@ -10,7 +10,7 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # Web Page Configuration
 st.set_page_config(
-    page_title="USDT Petty Cash Manager",
+    page_title="Weekly Budget Record",
     page_icon="💰",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -194,8 +194,8 @@ data = load_data()
 # LOGIN SCREEN (IF NOT AUTHENTICATED)
 # ------------------------------------
 if not st.session_state["authenticated"]:
-    st.title("🔒 Petty Cash Management System")
-    st.subheader("Welcome to Nextglobal Cash Portal")
+    st.title("🔒 Weekly Budget Record")
+    st.subheader("Welcome to Nextglobal Portal")
 
     col_login, col_pending = st.columns([1, 1.2], gap="large")
 
@@ -282,7 +282,7 @@ if not st.session_state["authenticated"]:
                 st.success(f"Removed '{removed['item']}'.")
                 st.rerun()
 
-    st.stop()  # Stop script execution here if user is not authenticated
+    st.stop()
 
 
 # ------------------------------------
@@ -372,7 +372,7 @@ if st.sidebar.button("🚪 Log Out", type="secondary"):
 # ------------------------------------
 # HEADER & PROMINENT EXCHANGE RATE BANNER
 # ------------------------------------
-st.title("💰 Petty Cash Management System (USDT)")
+st.title("💰 Weekly Budget Record")
 
 current_rate = st.session_state["tasa_usdt"]
 
@@ -446,14 +446,14 @@ with col4:
 st.markdown("<br>", unsafe_allow_html=True)
 
 # ------------------------------------
-# MAIN TABS
+# MAIN TABS (INCLUDES DEDICATED DELETE & QUICK DELETE)
 # ------------------------------------
 tab1, tab2, tab3, tab4, tab5 = st.tabs(
     [
         "📝 Record Expense",
         "📊 Weekly Summary",
         "✏️ Edit Expense",
-        "↩️ Delete Expense",
+        "🗑️ Delete Expense",
         "⚙️ Settings",
     ]
 )
@@ -513,7 +513,7 @@ with tab1:
                 )
                 st.rerun()
 
-# --- TAB 2: SUMMARY & HISTORY ---
+# --- TAB 2: SUMMARY & HISTORY (WITH QUICK DELETE OPTION) ---
 with tab2:
     st.subheader(f"Expense History - Week {week_num}")
     if not current_week["gastos"]:
@@ -538,6 +538,37 @@ with tab2:
                 }
             )
         st.dataframe(table_data, use_container_width=True)
+
+        # Quick Delete directly from Summary
+        st.markdown("---")
+        st.markdown("##### ⚡ Quick Delete Expense")
+        quick_del_opts = [
+            f"{i+1}. {g['producto']} (VES {g['precio']:.2f})"
+            for i, g in enumerate(current_week["gastos"])
+        ]
+        selected_quick_del = st.selectbox(
+            "Select expense to delete from summary:",
+            options=quick_del_opts,
+            key="quick_del_sum_select",
+        )
+        if st.button("🗑️ Delete Selected from Summary", type="primary"):
+            idx_q = quick_del_opts.index(selected_quick_del)
+            deleted_q = current_week["gastos"].pop(idx_q)
+            current_week["total_gastado"] -= deleted_q["precio"]
+            if current_week["total_gastado"] < 0:
+                current_week["total_gastado"] = 0.0
+
+            if deleted_q.get("factura"):
+                r_path_q = CARPETA_ADJUNTOS / deleted_q["factura"]
+                if r_path_q.exists():
+                    try:
+                        r_path_q.unlink()
+                    except Exception:
+                        pass
+
+            save_data(data)
+            st.success(f"🗑️ Successfully removed '{deleted_q['producto']}'.")
+            st.rerun()
 
         expenses_with_receipts = [
             g for g in current_week["gastos"] if g.get("factura")
@@ -677,7 +708,7 @@ with tab3:
                     st.success(f"✅ Successfully updated '{edit_product_name}'.")
                     st.rerun()
 
-# --- TAB 4: DELETE EXPENSE ---
+# --- TAB 4: DELETE EXPENSE (DEDICATED) ---
 with tab4:
     st.subheader(f"Delete Incorrect Expense - Week {week_num}")
     if not current_week["gastos"]:
