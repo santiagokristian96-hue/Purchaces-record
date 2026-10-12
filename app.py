@@ -177,7 +177,6 @@ def get_or_create_week(
         spent_usdt = prev["total_gastado"] / rate if rate > 0 else 0
         rollover = prev["presupuesto_disponible"] - spent_usdt
 
-    # budget_funded inicia en False por defecto para que NO se sume automáticamente
     new_week = {
         "numero": week_num,
         "presupuesto_base": base_budget,
@@ -401,6 +400,11 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+# RECALCULATE AVAILABLE BALANCE DYNAMICALLY
+is_funded = current_week.get("budget_funded", False)
+base_amount = current_week["presupuesto_base"] if is_funded else 0.0
+current_week["presupuesto_disponible"] = base_amount + current_week["remanente_anterior"]
+
 total_spent_usdt = (
     current_week["total_gastado"] / current_rate if current_rate > 0 else 0.0
 )
@@ -456,6 +460,32 @@ with col4:
     """,
         unsafe_allow_html=True,
     )
+
+# ------------------------------------
+# DIRECT FUNDING CONTROL BUTTON NEAR BALANCE
+# ------------------------------------
+st.markdown("<br>", unsafe_allow_html=True)
+c_fund1, c_fund2 = st.columns([1, 3])
+
+with c_fund1:
+    if not is_funded:
+        if st.button(f"➕ Fund Week (+{current_week['presupuesto_base']:.2f} USDT)", type="primary", use_container_width=True):
+            current_week["budget_funded"] = True
+            save_data(data)
+            st.success(f"Added +{current_week['presupuesto_base']:.2f} USDT to Available Balance!")
+            st.rerun()
+    else:
+        if st.button(f"➖ Unfund Week (-{current_week['presupuesto_base']:.2f} USDT)", type="secondary", use_container_width=True):
+            current_week["budget_funded"] = False
+            save_data(data)
+            st.warning(f"Removed {current_week['presupuesto_base']:.2f} USDT from Available Balance.")
+            st.rerun()
+
+with c_fund2:
+    if is_funded:
+        st.info("✅ **Status:** Weekly Budget has been transferred & added to Available Balance.")
+    else:
+        st.caption("ℹ️ **Status:** Weekly Budget not funded yet. Click the button on the left when you receive the transfer.")
 
 st.markdown("<br>", unsafe_allow_html=True)
 
@@ -712,23 +742,12 @@ with tab4:
             step=5.0,
         )
 
-        current_funded_status = current_week.get("budget_funded", False)
-        new_funded_status = st.checkbox(
-            "✅ Weekly Budget Funded / Received this week",
-            value=current_funded_status,
-            help="Check this ONLY when the company transfers/funds the budget this week so it gets added to your available balance.",
-        )
-
         if st.button("Save Budget Changes"):
             current_week["presupuesto_base"] = new_budget
             current_week["remanente_anterior"] = new_rollover
-            current_week["budget_funded"] = new_funded_status
-
-            active_base = new_budget if new_funded_status else 0.0
-            current_week["presupuesto_disponible"] = active_base + new_rollover
 
             save_data(data)
-            st.success("✅ Budget and funding settings updated.")
+            st.success("✅ Budget and Rollover updated.")
             st.rerun()
 
     with col_b:
