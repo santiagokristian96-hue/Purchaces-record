@@ -121,7 +121,7 @@ def fetch_online_usdt_rate() -> float:
 
 def get_current_real_week() -> int:
     current_iso_week = datetime.now().isocalendar()[1]
-    return max(40, current_iso_week)
+    return max(41, current_iso_week)
 
 def save_data(data):
     try:
