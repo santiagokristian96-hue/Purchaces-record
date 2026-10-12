@@ -446,14 +446,13 @@ with col4:
 st.markdown("<br>", unsafe_allow_html=True)
 
 # ------------------------------------
-# MAIN TABS (INCLUDES DEDICATED DELETE & QUICK DELETE)
+# MAIN TABS (4 TABS CLEAN)
 # ------------------------------------
-tab1, tab2, tab3, tab4, tab5 = st.tabs(
+tab1, tab2, tab3, tab4 = st.tabs(
     [
         "📝 Record Expense",
         "📊 Weekly Summary",
         "✏️ Edit Expense",
-        "🗑️ Delete Expense",
         "⚙️ Settings",
     ]
 )
@@ -513,7 +512,7 @@ with tab1:
                 )
                 st.rerun()
 
-# --- TAB 2: SUMMARY & HISTORY (WITH QUICK DELETE OPTION) ---
+# --- TAB 2: SUMMARY & HISTORY ---
 with tab2:
     st.subheader(f"Expense History - Week {week_num}")
     if not current_week["gastos"]:
@@ -538,37 +537,6 @@ with tab2:
                 }
             )
         st.dataframe(table_data, use_container_width=True)
-
-        # Quick Delete directly from Summary
-        st.markdown("---")
-        st.markdown("##### ⚡ Quick Delete Expense")
-        quick_del_opts = [
-            f"{i+1}. {g['producto']} (VES {g['precio']:.2f})"
-            for i, g in enumerate(current_week["gastos"])
-        ]
-        selected_quick_del = st.selectbox(
-            "Select expense to delete from summary:",
-            options=quick_del_opts,
-            key="quick_del_sum_select",
-        )
-        if st.button("🗑️ Delete Selected from Summary", type="primary"):
-            idx_q = quick_del_opts.index(selected_quick_del)
-            deleted_q = current_week["gastos"].pop(idx_q)
-            current_week["total_gastado"] -= deleted_q["precio"]
-            if current_week["total_gastado"] < 0:
-                current_week["total_gastado"] = 0.0
-
-            if deleted_q.get("factura"):
-                r_path_q = CARPETA_ADJUNTOS / deleted_q["factura"]
-                if r_path_q.exists():
-                    try:
-                        r_path_q.unlink()
-                    except Exception:
-                        pass
-
-            save_data(data)
-            st.success(f"🗑️ Successfully removed '{deleted_q['producto']}'.")
-            st.rerun()
 
         expenses_with_receipts = [
             g for g in current_week["gastos"] if g.get("factura")
@@ -708,45 +676,8 @@ with tab3:
                     st.success(f"✅ Successfully updated '{edit_product_name}'.")
                     st.rerun()
 
-# --- TAB 4: DELETE EXPENSE (DEDICATED) ---
+# --- TAB 4: FINANCIAL SETTINGS ---
 with tab4:
-    st.subheader(f"Delete Incorrect Expense - Week {week_num}")
-    if not current_week["gastos"]:
-        st.info("No expenses recorded for this week to delete.")
-    else:
-        expense_options_delete = [
-            f"{i+1}. {g['producto']} (VES {g['precio']:.2f})"
-            for i, g in enumerate(current_week["gastos"])
-        ]
-        selected_expense_delete = st.selectbox(
-            "Select expense to delete:",
-            options=expense_options_delete,
-            key="select_delete_expense",
-        )
-
-        if st.button("🗑️ Delete Selected Expense", type="primary"):
-            idx_del = expense_options_delete.index(selected_expense_delete)
-            deleted_expense = current_week["gastos"].pop(idx_del)
-            current_week["total_gastado"] -= deleted_expense["precio"]
-            if current_week["total_gastado"] < 0:
-                current_week["total_gastado"] = 0.0
-
-            if deleted_expense.get("factura"):
-                receipt_path = CARPETA_ADJUNTOS / deleted_expense["factura"]
-                if receipt_path.exists():
-                    try:
-                        receipt_path.unlink()
-                    except Exception:
-                        pass
-
-            save_data(data)
-            st.success(
-                f"🗑️ Successfully removed '{deleted_expense['producto']}'."
-            )
-            st.rerun()
-
-# --- TAB 5: FINANCIAL SETTINGS ---
-with tab5:
     st.subheader("⚙️ Financial Settings")
 
     col_a, col_b = st.columns(2)
