@@ -142,8 +142,12 @@ def get_or_create_week(
         if sem["numero"] == week_num:
             if "budget_funded" not in sem:
                 sem["budget_funded"] = True
-            active_base = sem["presupuesto_base"] if sem["budget_funded"] else 0.0
-            sem["presupuesto_disponible"] = active_base + sem["remanente_anterior"]
+            active_base = (
+                sem["presupuesto_base"] if sem["budget_funded"] else 0.0
+            )
+            sem["presupuesto_disponible"] = (
+                active_base + sem["remanente_anterior"]
+            )
             return sem
 
     valid_weeks = [s for s in data["semanas"] if s["numero"] >= 41]
@@ -291,7 +295,9 @@ st.markdown(
 total_spent_usdt = (
     current_week["total_gastado"] / current_rate if current_rate > 0 else 0.0
 )
-remaining_balance_usdt = current_week["presupuesto_disponible"] - total_spent_usdt
+remaining_balance_usdt = (
+    current_week["presupuesto_disponible"] - total_spent_usdt
+)
 remaining_balance_ves = remaining_balance_usdt * current_rate
 
 col1, col2, col3, col4 = st.columns(4)
@@ -564,7 +570,9 @@ with tab3:
 
                     old_price = target_expense["precio"]
                     current_week["total_gastado"] = (
-                        current_week["total_gastado"] - old_price + edit_price_ves
+                        current_week["total_gastado"]
+                        - old_price
+                        + edit_price_ves
                     )
                     if current_week["total_gastado"] < 0:
                         current_week["total_gastado"] = 0.0
@@ -593,3 +601,90 @@ with tab4:
         expense_options_delete = [
             f"{i+1}. {g['producto']} (VES {g['precio']:.2f})"
             for i, g in enumerate(current_week["gastos"])
+        ]
+        selected_expense_delete = st.selectbox(
+            "Select expense to delete:",
+            options=expense_options_delete,
+            key="select_delete_expense",
+        )
+
+        if st.button("🗑️ Delete Selected Expense", type="primary"):
+            idx_del = expense_options_delete.index(selected_expense_delete)
+            deleted_expense = current_week["gastos"].pop(idx_del)
+            current_week["total_gastado"] -= deleted_expense["precio"]
+            if current_week["total_gastado"] < 0:
+                current_week["total_gastado"] = 0.0
+
+            if deleted_expense.get("factura"):
+                receipt_path = CARPETA_ADJUNTOS / deleted_expense["factura"]
+                if receipt_path.exists():
+                    try:
+                        receipt_path.unlink()
+                    except Exception:
+                        pass
+
+            save_data(data)
+            st.success(
+                f"🗑️ Successfully removed '{deleted_expense['producto']}'."
+            )
+            st.rerun()
+
+# --- TAB 5: FINANCIAL SETTINGS ---
+with tab5:
+    st.subheader("⚙️ Financial Settings")
+
+    col_a, col_b = st.columns(2)
+    with col_a:
+        st.markdown("##### 💵 Budget & Rollover")
+        new_budget = st.number_input(
+            "Weekly Budget ($ USDT):",
+            min_value=0.0,
+            value=float(current_week["presupuesto_base"]),
+            step=5.0,
+        )
+        new_rollover = st.number_input(
+            "Rollover / Savings ($ USDT):",
+            min_value=0.0,
+            value=float(current_week["remanente_anterior"]),
+            step=5.0,
+        )
+
+        current_funded_status = current_week.get("budget_funded", True)
+        new_funded_status = st.checkbox(
+            "✅ Weekly Budget Funded / Received this week",
+            value=current_funded_status,
+            help="Uncheck this if the company did not fund the budget this week so it won't be added automatically.",
+        )
+
+        if st.button("Save Budget Changes"):
+            current_week["presupuesto_base"] = new_budget
+            current_week["remanente_anterior"] = new_rollover
+            current_week["budget_funded"] = new_funded_status
+
+            active_base = new_budget if new_funded_status else 0.0
+            current_week["presupuesto_disponible"] = active_base + new_rollover
+
+            save_data(data)
+            st.success("✅ Budget and funding settings updated.")
+            st.rerun()
+
+    with col_b:
+        st.markdown("##### 🪙 USDT Exchange Rate")
+        manual_rate = st.number_input(
+            "Manual USDT Rate (VES):",
+            min_value=0.1,
+            value=float(st.session_state["tasa_usdt"]),
+            step=1.0,
+        )
+
+        col_b1, col_b2 = st.columns(2)
+        with col_b1:
+            if st.button("Apply Manual Rate"):
+                st.session_state["tasa_usdt"] = manual_rate
+                st.success(f"Rate set to VES {manual_rate:.2f}")
+                st.rerun()
+        with col_b2:
+            if st.button("🔄 Sync with Binance P2P"):
+                st.session_state["tasa_usdt"] = fetch_online_usdt_rate()
+                st.success("Rate updated from Binance P2P.")
+                st.rerun()
