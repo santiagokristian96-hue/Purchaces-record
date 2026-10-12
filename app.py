@@ -1,10 +1,10 @@
 import json
 from datetime import datetime
-from pathlib import Path
 import requests
 import streamlit as st
 from bs4 import BeautifulSoup
 import urllib3
+from supabase import create_client, Client
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -51,9 +51,18 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-ARCH_DB = Path("caja_chica.json")
-CARPETA_ADJUNTOS = Path("adjuntos")
-CARPETA_ADJUNTOS.mkdir(parents=True, exist_ok=True)
+# ------------------------------------
+# SUPABASE CONNECTION SETUP
+# ------------------------------------
+try:
+    SUPABASE_URL = st.secrets["SUPABASE_URL"]
+    SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
+    supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+except Exception as e:
+    st.error(
+        "⚠️ Error connecting to Supabase. Please configure SUPABASE_URL and SUPABASE_KEY in Streamlit Secrets."
+    )
+    st.stop()
 
 
 # ------------------------------------
@@ -61,7 +70,6 @@ CARPETA_ADJUNTOS.mkdir(parents=True, exist_ok=True)
 # ------------------------------------
 @st.cache_data(ttl=600)
 def fetch_online_usdt_rate() -> float:
-    # 1. Primary Source: Official Binance P2P API (USDT / VES)
     try:
         url = "https://p2p.binance.com/bapi/c2c/v2/friendly/c2c/adv/search"
         headers = {
@@ -88,7 +96,6 @@ def fetch_online_usdt_rate() -> float:
     except Exception:
         pass
 
-    # 2. Secondary Fallback Source: alcambio.app
     try:
         headers = {"User-Agent": "Mozilla/5.0"}
         res = requests.get("https://alcambio.app/", headers=headers, timeout=5)
@@ -113,26 +120,36 @@ def fetch_online_usdt_rate() -> float:
 
 
 def get_current_real_week() -> int:
-    """Returns current real-world ISO week number (minimum 41)."""
     current_iso_week = datetime.now().isocalendar()[1]
     return max(41, current_iso_week)
 
 
 def load_data():
-    if ARCH_DB.exists():
-        with open(ARCH_DB, "r", encoding="utf-8") as f:
-            data = json.load(f)
-            if "semanas" not in data:
-                data["semanas"] = []
-            if "pending_purchases" not in data:
-                data["pending_purchases"] = []
-            return data
-    return {"semanas": [], "pending_purchases": []}
+    try:
+        response = (
+            supabase.table("app_data")
+            .select("content")
+            .eq("id", 1)
+            .execute()
+        )
+        if response.data and len(response.data) > 0:
+            return response.data[0]["content"]
+    except Exception:
+        pass
+
+    # Default structure if empty
+    default_data = {"semanas": [], "pending_purchases": []}
+    save_data(default_data)
+    return default_data
 
 
 def save_data(data):
-    with open(ARCH_DB, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=4, ensure_ascii=False)
+    try:
+        supabase.table("app_data").upsert(
+            {"id": 1, "content": data}
+        ).execute()
+    except Exception as e:
+        st.error(f"Error saving data to Supabase: {e}")
 
 
 def get_or_create_week(
@@ -199,7 +216,6 @@ if not st.session_state["authenticated"]:
 
     col_login, col_pending = st.columns([1, 1.2], gap="large")
 
-    # LEFT COLUMN: LOGIN FORM
     with col_login:
         st.markdown("### 🔑 System Access")
         with st.form("login_form"):
@@ -215,7 +231,6 @@ if not st.session_state["authenticated"]:
                 else:
                     st.error("❌ Incorrect password. Please try again.")
 
-    # RIGHT COLUMN: PUBLIC PENDING PURCHASES PORTAL
     with col_pending:
         st.markdown("### 🛒 Pending Purchases List")
         st.caption("View and register items or needs before logging into full system.")
@@ -289,7 +304,6 @@ if not st.session_state["authenticated"]:
 # MAIN APPLICATION (AUTHENTICATED USER)
 # ------------------------------------
 
-# SIDEBAR (LEFT PANEL)
 st.sidebar.title("⚙️ Settings")
 st.sidebar.markdown(
     f"🪙 **USDT Rate:** `VES {st.session_state['tasa_usdt']:.2f}`"
@@ -376,7 +390,6 @@ st.title("💰 Weekly Budget Record")
 
 current_rate = st.session_state["tasa_usdt"]
 
-# Prominent Exchange Rate Banner on Main Page
 st.markdown(
     f"""
     <div style="background: linear-gradient(135deg, #1e222d 0%, #2b3245 100%); border: 2px solid #00d2ff; border-radius: 12px; padding: 15px; text-align: center; margin-bottom: 20px; box-shadow: 0 4px 12px rgba(0,0,0,0.5);">
@@ -446,7 +459,7 @@ with col4:
 st.markdown("<br>", unsafe_allow_html=True)
 
 # ------------------------------------
-# MAIN TABS (4 TABS CLEAN)
+# MAIN TABS
 # ------------------------------------
 tab1, tab2, tab3, tab4 = st.tabs(
     [
@@ -488,8 +501,12 @@ with tab1:
                     ext = Path(receipt_file.name).suffix
                     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                     receipt_filename = f"receipt_wk{week_num}_{timestamp}{ext}"
-                    with open(CARPETA_ADJUNTOS / receipt_filename, "wb") as f:
-                        f.write(receipt_file.getbuffer())
+                    
+                    # Upload file to Supabase Storage Bucket 'receipts'
+                    file_bytes = receipt_file.getvalue()
+                    supabase.storage.from_("receipts").upload(
+                        receipt_filename, file_bytes, file_options={"upsert": "true"}
+                    )
 
                 p_usdt = (
                     round(price_ves / current_rate, 2)
@@ -556,24 +573,26 @@ with tab2:
 
             idx_rec = receipt_options.index(selected_receipt_item)
             rec_filename = expenses_with_receipts[idx_rec]["factura"]
-            rec_path = CARPETA_ADJUNTOS / rec_filename
-
-            if rec_path.exists():
-                ext_file = rec_path.suffix.lower()
+            
+            try:
+                public_url = supabase.storage.from_("receipts").get_public_url(rec_filename)
+                ext_file = Path(rec_filename).suffix.lower()
                 if ext_file in [".png", ".jpg", ".jpeg"]:
                     st.image(
-                        str(rec_path),
+                        public_url,
                         caption=f"Receipt: {rec_filename}",
                         use_container_width=True,
                     )
                 elif ext_file == ".pdf":
-                    with open(rec_path, "rb") as pdf_file:
-                        st.download_button(
-                            label=f"📄 Download PDF Receipt ({rec_filename})",
-                            data=pdf_file,
-                            file_name=rec_filename,
-                            mime="application/pdf",
-                        )
+                    file_res = supabase.storage.from_("receipts").download(rec_filename)
+                    st.download_button(
+                        label=f"📄 Download PDF Receipt ({rec_filename})",
+                        data=file_res,
+                        file_name=rec_filename,
+                        mime="application/pdf",
+                    )
+            except Exception as e:
+                st.error(f"Could not load receipt file: {e}")
 
 # --- TAB 3: EDIT EXPENSE ---
 with tab3:
@@ -597,19 +616,21 @@ with tab3:
         current_receipt = target_expense.get("factura")
         if current_receipt:
             st.markdown("##### 📎 Current Attached Receipt:")
-            r_path_edit = CARPETA_ADJUNTOS / current_receipt
-            if r_path_edit.exists():
-                ext_edit = r_path_edit.suffix.lower()
+            try:
+                public_url_edit = supabase.storage.from_("receipts").get_public_url(current_receipt)
+                ext_edit = Path(current_receipt).suffix.lower()
                 if ext_edit in [".png", ".jpg", ".jpeg"]:
-                    st.image(str(r_path_edit), width=280)
+                    st.image(public_url_edit, width=280)
                 elif ext_edit == ".pdf":
-                    with open(r_path_edit, "rb") as pdf_f:
-                        st.download_button(
-                            label="📄 Download Attached PDF Receipt",
-                            data=pdf_f,
-                            file_name=current_receipt,
-                            mime="application/pdf",
-                        )
+                    file_res_edit = supabase.storage.from_("receipts").download(current_receipt)
+                    st.download_button(
+                        label="📄 Download Attached PDF Receipt",
+                        data=file_res_edit,
+                        file_name=current_receipt,
+                        mime="application/pdf",
+                    )
+            except Exception:
+                pass
 
         with st.form("form_edit_compra"):
             edit_product_name = st.text_input(
@@ -639,18 +660,13 @@ with tab3:
                     receipt_filename = target_expense.get("factura")
 
                     if edit_receipt_file is not None:
-                        if receipt_filename:
-                            old_path = CARPETA_ADJUNTOS / receipt_filename
-                            if old_path.exists():
-                                try:
-                                    old_path.unlink()
-                                except Exception:
-                                    pass
                         ext = Path(edit_receipt_file.name).suffix
                         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                         receipt_filename = f"receipt_wk{week_num}_{timestamp}{ext}"
-                        with open(CARPETA_ADJUNTOS / receipt_filename, "wb") as f:
-                            f.write(edit_receipt_file.getbuffer())
+                        file_bytes = edit_receipt_file.getvalue()
+                        supabase.storage.from_("receipts").upload(
+                            receipt_filename, file_bytes, file_options={"upsert": "true"}
+                        )
 
                     old_price = target_expense["precio"]
                     current_week["total_gastado"] = (
