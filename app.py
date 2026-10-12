@@ -119,12 +119,18 @@ def fetch_online_usdt_rate() -> float:
 
     return 100.00
 
-
 def get_current_real_week() -> int:
     current_iso_week = datetime.now().isocalendar()[1]
     return max(41, current_iso_week)
 
-
+def save_data(data):
+    try:
+        supabase.table("app_data").upsert(
+            {"id": 1, "content": data}
+        ).execute()
+    except Exception as e:
+        st.error(f"Error saving data to Supabase: {e}")
+        
 def load_data():
     try:
         response = (
@@ -141,15 +147,6 @@ def load_data():
     default_data = {"semanas": [], "pending_purchases": []}
     save_data(default_data)
     return default_data
-
-
-def save_data(data):
-    try:
-        supabase.table("app_data").upsert(
-            {"id": 1, "content": data}
-        ).execute()
-    except Exception as e:
-        st.error(f"Error saving data to Supabase: {e}")
 
 
 def get_or_create_week(
