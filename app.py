@@ -1,3 +1,4 @@
+import io
 import json
 from datetime import datetime
 from pathlib import Path
@@ -5,6 +6,12 @@ import requests
 import streamlit as st
 from bs4 import BeautifulSoup
 import urllib3
+
+# ReportLab imports for clean PDF generation
+from reportlab.lib.pagesizes import letter
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib import colors
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -51,7 +58,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-ARCH_DB = Path("caja_chica.json") #json no nos sirve para esto. necesitamos la base de datos en línea (supabase o la que sea).
+ARCH_DB = Path("caja_chica.json")
 CARPETA_ADJUNTOS = Path("adjuntos")
 CARPETA_ADJUNTOS.mkdir(parents=True, exist_ok=True)
 
@@ -95,11 +102,7 @@ def fetch_online_usdt_rate() -> float:
             next_data = soup.find("script", id="__NEXT_DATA__")
             if next_data and next_data.string:
                 data = json.loads(next_data.string)
-                rates = (
-                    data.get("props", {})
-                    .get("pageProps", {})
-                    .get("rates", [])
-                )
+                rates = data.get("props", {}).get("pageProps", {}).get("rates", [])
                 for rate in rates:
                     name = str(rate.get("source", "")).lower()
                     if "binance" in name or "usdt" in name:
@@ -132,9 +135,7 @@ def save_data(data):
         json.dump(data, f, indent=4, ensure_ascii=False)
 
 
-def get_or_create_week(
-    data, week_num, base_budget=25.0, initial_savings=60.0
-):
+def get_or_create_week(data, week_num, base_budget=25.0, initial_savings=60.0):
     for sem in data["semanas"]:
         if sem["numero"] == week_num:
             if "budget_funded" not in sem:
@@ -167,6 +168,111 @@ def get_or_create_week(
     data["semanas"].append(new_week)
     save_data(data)
     return new_week
+
+
+def generate_pdf_report(week_data, rate):
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=letter,
+        rightMargin=36,
+        leftMargin=36,
+        topMargin=36,
+        bottomMargin=36,
+    )
+    styles = getSampleStyleSheet()
+    story = []
+
+    # Title & Header
+    title_style = ParagraphStyle(
+        "DocTitle", parent=styles["Title"], fontSize=20, leading=24, textColor=colors.HexColor("#1e222d")
+    )
+    sub_style = ParagraphStyle(
+        "DocSub", parent=styles["Normal"], fontSize=10, textColor=colors.HexColor("#555555")
+    )
+
+    story.append(Paragraph("NEXTGLOBAL - WEEKLY EXPENSE REPORT", title_style))
+    story.append(Paragraph(f"Week {week_data['numero']} | Date Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", sub_style))
+    story.append(Paragraph(f"USDT Exchange Rate: <b>VES {rate:.2f}</b>", sub_style))
+    story.append(Spacer(1, 15))
+
+    # Financial Summary Table
+    is_funded = week_data.get("budget_funded", False)
+    funded_text = "Funded" if is_funded else "Not Funded"
+    total_spent_usdt = week_data["total_gastado"] / rate if rate > 0 else 0.0
+    rem_usdt = week_data["presupuesto_disponible"] - total_spent_usdt
+    rem_ves = rem_usdt * rate
+
+    summary_data = [
+        ["Weekly Budget", "Rollover / Savings", "Status", "Total Spent", "Available Balance"],
+        [
+            f"${week_data['presupuesto_base']:.2f} USDT",
+            f"${week_data['remanente_anterior']:.2f} USDT",
+            funded_text,
+            f"${total_spent_usdt:.2f} USDT\n(VES {week_data['total_gastado']:.2f})",
+            f"${rem_usdt:.2f} USDT\n(VES {rem_ves:.2f})",
+        ],
+    ]
+
+    summary_table = Table(summary_data, colWidths=[100, 110, 80, 120, 130])
+    summary_table.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1e222d")),
+                ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                ("FONTSIZE", (0, 0), (-1, -1), 9),
+                ("BOTTOMPADDING", (0, 0), (-1, 0), 6),
+                ("BACKGROUND", (0, 1), (-1, 1), colors.HexColor("#f4f6f9")),
+                ("GRID", (0, 0), (-1, -1), 1, colors.HexColor("#cccccc")),
+            ]
+        )
+    )
+    story.append(summary_table)
+    story.append(Spacer(1, 20))
+
+    # Expense Details Table
+    story.append(Paragraph("<b>Expenses Break Down</b>", styles["Heading2"]))
+    story.append(Spacer(1, 8))
+
+    expenses = week_data.get("gastos", [])
+    if not expenses:
+        story.append(Paragraph("No expenses recorded for this week.", styles["Normal"]))
+    else:
+        item_table_data = [["#", "Item / Service Name", "Price (VES)", "Price (USDT)", "Attachment", "Date & Time"]]
+        for idx, g in enumerate(expenses, 1):
+            p_usdt = g.get("precio_usdt", g["precio"] / rate if rate > 0 else 0)
+            has_att = "Yes" if g.get("factura") else "No"
+            item_table_data.append([
+                str(idx),
+                g["producto"],
+                f"VES {g['precio']:.2f}",
+                f"${p_usdt:.2f}",
+                has_att,
+                g["fecha"],
+            ])
+
+        expense_table = Table(item_table_data, colWidths=[25, 180, 90, 80, 65, 100])
+        expense_table.setStyle(
+            TableStyle(
+                [
+                    ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#2b3245")),
+                    ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                    ("ALIGN", (0, 0), (-1, -1), "LEFT"),
+                    ("ALIGN", (0, 0), (0, -1), "CENTER"),
+                    ("ALIGN", (2, 0), (3, -1), "RIGHT"),
+                    ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                    ("FONTSIZE", (0, 0), (-1, -1), 8.5),
+                    ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#dddddd")),
+                ]
+            )
+        )
+        story.append(expense_table)
+
+    doc.build(story)
+    buffer.seek(0)
+    return buffer.getvalue()
 
 
 # ------------------------------------
@@ -227,9 +333,7 @@ if not st.session_state["authenticated"]:
                             "item": pub_item_name,
                             "priority": pub_item_prio,
                             "notes": "",
-                            "date_added": datetime.now().strftime(
-                                "%Y-%m-%d %H:%M:%S"
-                            ),
+                            "date_added": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                         }
                     )
                     save_data(data)
@@ -245,13 +349,7 @@ if not st.session_state["authenticated"]:
         else:
             table_pub = []
             for i, p_item in enumerate(pending_items_pub, 1):
-                prio_icon = (
-                    "🔴"
-                    if p_item["priority"] == "High"
-                    else "🟡"
-                    if p_item["priority"] == "Medium"
-                    else "🟢"
-                )
+                prio_icon = "🔴" if p_item["priority"] == "High" else "🟡" if p_item["priority"] == "Medium" else "🟢"
                 table_pub.append(
                     {
                         "#": i,
@@ -262,12 +360,8 @@ if not st.session_state["authenticated"]:
                 )
             st.dataframe(table_pub, use_container_width=True)
 
-            pub_del_options = [
-                f"{i+1}. {it['item']}" for i, it in enumerate(pending_items_pub)
-            ]
-            pub_selected_del = st.selectbox(
-                "Remove resolved item:", options=pub_del_options, key="pub_del_select"
-            )
+            pub_del_options = [f"{i+1}. {it['item']}" for i, it in enumerate(pending_items_pub)]
+            pub_selected_del = st.selectbox("Remove resolved item:", options=pub_del_options, key="pub_del_select")
             if st.button("🗑️ Remove Selected Item"):
                 idx_to_del = pub_del_options.index(pub_selected_del)
                 removed = data["pending_purchases"].pop(idx_to_del)
@@ -283,9 +377,7 @@ if not st.session_state["authenticated"]:
 # ------------------------------------
 
 st.sidebar.title("⚙️ Settings")
-st.sidebar.markdown(
-    f"🪙 **USDT Rate:** `VES {st.session_state['tasa_usdt']:.2f}`"
-)
+st.sidebar.markdown(f"🪙 **USDT Rate:** `VES {st.session_state['tasa_usdt']:.2f}`")
 
 st.sidebar.caption(f"📅 Real Current Week: **Week {real_current_week}**")
 
@@ -320,9 +412,7 @@ with st.sidebar.expander("➕ Add Pending Item"):
                         "item": sb_item_name,
                         "priority": sb_item_prio,
                         "notes": "",
-                        "date_added": datetime.now().strftime(
-                            "%Y-%m-%d %H:%M:%S"
-                        ),
+                        "date_added": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                     }
                 )
                 save_data(data)
@@ -334,21 +424,11 @@ if not pending_items:
     st.sidebar.caption("No pending items.")
 else:
     for idx, p_item in enumerate(pending_items):
-        prio_color = (
-            "🔴"
-            if p_item["priority"] == "High"
-            else "🟡"
-            if p_item["priority"] == "Medium"
-            else "🟢"
-        )
+        prio_color = "🔴" if p_item["priority"] == "High" else "🟡" if p_item["priority"] == "Medium" else "🟢"
         st.sidebar.markdown(f"{prio_color} **{p_item['item']}**")
 
-    sb_del_options = [
-        f"{i+1}. {it['item']}" for i, it in enumerate(pending_items)
-    ]
-    sb_selected_del = st.sidebar.selectbox(
-        "Remove item:", options=sb_del_options, key="sb_del_select"
-    )
+    sb_del_options = [f"{i+1}. {it['item']}" for i, it in enumerate(pending_items)]
+    sb_selected_del = st.sidebar.selectbox("Remove item:", options=sb_del_options, key="sb_del_select")
     if st.sidebar.button("🗑️ Remove Selected Item"):
         idx_to_del = sb_del_options.index(sb_selected_del)
         data["pending_purchases"].pop(idx_to_del)
@@ -412,12 +492,8 @@ is_funded = current_week.get("budget_funded", False)
 base_amount = current_week["presupuesto_base"] if is_funded else 0.0
 current_week["presupuesto_disponible"] = base_amount + current_week["remanente_anterior"]
 
-total_spent_usdt = (
-    current_week["total_gastado"] / current_rate if current_rate > 0 else 0.0
-)
-remaining_balance_usdt = (
-    current_week["presupuesto_disponible"] - total_spent_usdt
-)
+total_spent_usdt = current_week["total_gastado"] / current_rate if current_rate > 0 else 0.0
+remaining_balance_usdt = current_week["presupuesto_disponible"] - total_spent_usdt
 remaining_balance_ves = remaining_balance_usdt * current_rate
 
 col1, col2, col3, col4 = st.columns(4)
@@ -487,9 +563,7 @@ with tab1:
     st.subheader(f"Record Expense - Week {week_num}")
     with st.form("form_compra", clear_on_submit=True):
         product_name = st.text_input("Item or Service Name:")
-        price_ves = st.number_input(
-            "Price in Bolivars (VES):", min_value=0.0, step=0.5
-        )
+        price_ves = st.number_input("Price in Bolivars (VES):", min_value=0.0, step=0.5)
         receipt_file = st.file_uploader(
             "Attach Invoice / Receipt (optional):",
             type=["png", "jpg", "jpeg", "pdf"],
@@ -516,11 +590,7 @@ with tab1:
                     with open(CARPETA_ADJUNTOS / receipt_filename, "wb") as f:
                         f.write(receipt_file.getbuffer())
 
-                p_usdt = (
-                    round(price_ves / current_rate, 2)
-                    if current_rate > 0
-                    else 0.0
-                )
+                p_usdt = round(price_ves / current_rate, 2) if current_rate > 0 else 0.0
                 expense = {
                     "producto": product_name,
                     "precio": price_ves,
@@ -531,48 +601,68 @@ with tab1:
                 current_week["gastos"].append(expense)
                 current_week["total_gastado"] += price_ves
                 save_data(data)
-                st.success(
-                    f"✅ Registered '{product_name}' for VES {price_ves:.2f}"
-                    f" ({p_usdt:.2f} USDT)"
-                )
+                st.success(f"✅ Registered '{product_name}' for VES {price_ves:.2f} ({p_usdt:.2f} USDT)")
                 st.rerun()
 
 # --- TAB 2: SUMMARY & HISTORY ---
 with tab2:
-    st.subheader(f"Expense History - Week {week_num}")
+    st.subheader(f"Expense History & Exports - Week {week_num}")
+    
+    # DOWNLOAD REPORT BUTTONS
+    col_pdf, col_csv, _ = st.columns([1, 1, 2])
+    with col_pdf:
+        try:
+            pdf_bytes = generate_pdf_report(current_week, current_rate)
+            st.download_button(
+                label="📄 Download Weekly PDF Report",
+                data=pdf_bytes,
+                file_name=f"Expense_Report_Week_{week_num}.pdf",
+                mime="application/pdf",
+                use_container_width=True,
+            )
+        except Exception as e:
+            st.error(f"Could not generate PDF: {e}")
+
+    with col_csv:
+        if current_week["gastos"]:
+            csv_lines = ["Item / Service,Price (VES),Price (USDT),Date & Time"]
+            for g in current_week["gastos"]:
+                p_usdt = g.get("precio_usdt", g["precio"] / current_rate if current_rate > 0 else 0)
+                csv_lines.append(f'"{g["producto"]}",{g["precio"]:.2f},{p_usdt:.2f},"{g["fecha"]}"')
+            csv_data = "\n".join(csv_lines)
+            st.download_button(
+                label="📊 Download CSV Data",
+                data=csv_data,
+                file_name=f"Expenses_Week_{week_num}.csv",
+                mime="text/csv",
+                use_container_width=True,
+            )
+
+    st.markdown("---")
+
     if not current_week["gastos"]:
         st.info("No expenses recorded for this week.")
     else:
         table_data = []
         for i, g in enumerate(current_week["gastos"], 1):
-            p_usdt = g.get(
-                "precio_usdt",
-                g["precio"] / current_rate if current_rate > 0 else 0,
-            )
+            p_usdt = g.get("precio_usdt", g["precio"] / current_rate if current_rate > 0 else 0)
             table_data.append(
                 {
                     "#": i,
                     "Item / Service": g["producto"],
                     "Price (VES)": f"VES {g['precio']:.2f}",
                     "Price (USDT)": f"{p_usdt:.2f} USDT",
-                    "Receipt": (
-                        g["factura"] if g.get("factura") else "No attachment"
-                    ),
+                    "Receipt": g["factura"] if g.get("factura") else "No attachment",
                     "Date & Time": g["fecha"],
                 }
             )
         st.dataframe(table_data, use_container_width=True)
 
-        expenses_with_receipts = [
-            g for g in current_week["gastos"] if g.get("factura")
-        ]
+        expenses_with_receipts = [g for g in current_week["gastos"] if g.get("factura")]
         if expenses_with_receipts:
             st.markdown("---")
             st.subheader("📎 View Attached Receipts")
-            receipt_options = [
-                f"{g['producto']} (VES {g['precio']:.2f})"
-                for g in expenses_with_receipts
-            ]
+            receipt_options = [f"{g['producto']} (VES {g['precio']:.2f})" for g in expenses_with_receipts]
             selected_receipt_item = st.selectbox(
                 "Select an expense to inspect its receipt:",
                 options=receipt_options,
@@ -586,11 +676,7 @@ with tab2:
             if rec_path.exists():
                 ext_file = rec_path.suffix.lower()
                 if ext_file in [".png", ".jpg", ".jpeg"]:
-                    st.image(
-                        str(rec_path),
-                        caption=f"Receipt: {rec_filename}",
-                        use_container_width=True,
-                    )
+                    st.image(str(rec_path), caption=f"Receipt: {rec_filename}", use_container_width=True)
                 elif ext_file == ".pdf":
                     with open(rec_path, "rb") as pdf_file:
                         st.download_button(
@@ -606,10 +692,7 @@ with tab3:
     if not current_week["gastos"]:
         st.info("No expenses recorded for this week to edit.")
     else:
-        expense_options_edit = [
-            f"{i+1}. {g['producto']} (VES {g['precio']:.2f})"
-            for i, g in enumerate(current_week["gastos"])
-        ]
+        expense_options_edit = [f"{i+1}. {g['producto']} (VES {g['precio']:.2f})" for i, g in enumerate(current_week["gastos"])]
         selected_expense_edit = st.selectbox(
             "Select expense to edit:",
             options=expense_options_edit,
@@ -637,9 +720,7 @@ with tab3:
                         )
 
         with st.form("form_edit_compra"):
-            edit_product_name = st.text_input(
-                "Item or Service Name:", value=target_expense["producto"]
-            )
+            edit_product_name = st.text_input("Item or Service Name:", value=target_expense["producto"])
             edit_price_ves = st.number_input(
                 "Price in Bolivars (VES):",
                 min_value=0.0,
@@ -678,19 +759,11 @@ with tab3:
                             f.write(edit_receipt_file.getbuffer())
 
                     old_price = target_expense["precio"]
-                    current_week["total_gastado"] = (
-                        current_week["total_gastado"]
-                        - old_price
-                        + edit_price_ves
-                    )
+                    current_week["total_gastado"] = current_week["total_gastado"] - old_price + edit_price_ves
                     if current_week["total_gastado"] < 0:
                         current_week["total_gastado"] = 0.0
 
-                    p_usdt = (
-                        round(edit_price_ves / current_rate, 2)
-                        if current_rate > 0
-                        else 0.0
-                    )
+                    p_usdt = round(edit_price_ves / current_rate, 2) if current_rate > 0 else 0.0
 
                     target_expense["producto"] = edit_product_name
                     target_expense["precio"] = edit_price_ves
