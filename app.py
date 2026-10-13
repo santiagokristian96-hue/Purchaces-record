@@ -289,7 +289,7 @@ if not st.session_state["authenticated"]:
 # ------------------------------------
 st.sidebar.markdown(f"""
     <div style="text-align: center; margin-bottom: 40px;">
-        <img src="data:image/jpeg;base64,{NG_LOGO_BASE64}" width="120" style="border-radius: 8px;">
+        <img src="data:image/jpeg;base64,{NG_LOGO_BASE64}" width="220" style="border-radius: 16px;">
     </div>
     """,
     unsafe_allow_html=True
