@@ -196,19 +196,19 @@ data = load_data()
 # LOGIN SCREEN (IF NOT AUTHENTICATED)
 # ------------------------------------
 if not st.session_state["authenticated"]:
+    st.sidebar.markdown(f"""
+                <div style="text-align: center; margin-bottom: 40px;">
+                    <img src="data:image/jpg;base64,{NG_LOGO_BASE64}" width="880" style="border-radius: 16px;">
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
     st.title("🔒 Weekly Budget Record")
     st.subheader("Welcome to Nextglobal Portal")
 
     col_login, col_pending = st.columns([1, 1.2], gap="large")
 
-    with col_login:
-        st.sidebar.markdown(f"""
-            <div style="text-align: center; margin-bottom: 40px;">
-                <img src="data:image/jpg;base64,{NG_LOGO_BASE64}" width="880" style="border-radius: 16px;">
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
+    with col_login:        
         st.markdown("### 🔑 System Access")
         with st.form("login_form"):
             st.text_input("Username:", value="Nextglobal", disabled=True)
