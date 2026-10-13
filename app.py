@@ -284,12 +284,13 @@ if not st.session_state["authenticated"]:
 
     st.stop()
 
+
 # ------------------------------------
 # MAIN APPLICATION (AUTHENTICATED USER)
 # ------------------------------------
 st.sidebar.markdown(f"""
     <div style="text-align: center; margin-bottom: 40px;">
-        <img src="data:image/jpeg;base64,{NG_LOGO_BASE64}" width="220" style="border-radius: 16px;">
+        <img src="data:image/jpg;base64,{NG_LOGO_BASE64}" width="880" style="border-radius: 16px;">
     </div>
     """,
     unsafe_allow_html=True
