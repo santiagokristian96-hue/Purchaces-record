@@ -7,7 +7,7 @@ from bs4 import BeautifulSoup
 import urllib3
 from supabase import create_client, Client
 
-getcontext().prec = 12
+#getcontext().prec = 12
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # Web Page Configuration
