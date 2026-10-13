@@ -124,7 +124,6 @@ def get_current_real_week() -> int:
     current_iso_week = datetime.now().isocalendar()[1]
     return max(41, current_iso_week)
 
-
 def load_data():
     if ARCH_DB.exists():
         with open(ARCH_DB, "r", encoding="utf-8") as f:
@@ -136,11 +135,9 @@ def load_data():
             return data
     return {"semanas": [], "pending_purchases": []}
 
-
 def save_data(data):
     with open(ARCH_DB, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=4, ensure_ascii=False)
-
 
 def get_or_create_week(
     data, week_num, base_budget=25.0, initial_savings=60.0
@@ -287,12 +284,11 @@ if not st.session_state["authenticated"]:
 
     st.stop()
 
-
 # ------------------------------------
 # MAIN APPLICATION (AUTHENTICATED USER)
 # ------------------------------------
 st.sidebar.markdown(f"""
-    <div style="text-align: center; margin-bottom: 20px;">
+    <div style="text-align: center; margin-bottom: 40px;">
         <img src="data:image/jpeg;base64,{NG_LOGO_BASE64}" width="120" style="border-radius: 8px;">
     </div>
     """,
