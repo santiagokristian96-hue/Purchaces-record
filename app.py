@@ -544,4 +544,208 @@ with tab2:
         st.info("No expenses recorded for this week.")
     else:
         table_data = []
-        for i, g in
+        for i, g in enumerate(current_week["gastos"], 1):
+            p_usdt = g.get(
+                "precio_usdt",
+                g["precio"] / current_rate if current_rate > 0 else 0,
+            )
+            table_data.append(
+                {
+                    "#": i,
+                    "Item / Service": g["producto"],
+                    "Price (VES)": f"VES {g['precio']:.2f}",
+                    "Price (USDT)": f"{p_usdt:.2f} USDT",
+                    "Receipt": (
+                        g["factura"] if g.get("factura") else "No attachment"
+                    ),
+                    "Date & Time": g["fecha"],
+                }
+            )
+        st.dataframe(table_data, use_container_width=True)
+
+        expenses_with_receipts = [
+            g for g in current_week["gastos"] if g.get("factura")
+        ]
+        if expenses_with_receipts:
+            st.markdown("---")
+            st.subheader("📎 View Attached Receipts")
+            receipt_options = [
+                f"{g['producto']} (VES {g['precio']:.2f})"
+                for g in expenses_with_receipts
+            ]
+            selected_receipt_item = st.selectbox(
+                "Select an expense to inspect its receipt:",
+                options=receipt_options,
+                key="select_receipt_summary",
+            )
+
+            idx_rec = receipt_options.index(selected_receipt_item)
+            rec_filename = expenses_with_receipts[idx_rec]["factura"]
+            rec_path = CARPETA_ADJUNTOS / rec_filename
+
+            if rec_path.exists():
+                ext_file = rec_path.suffix.lower()
+                if ext_file in [".png", ".jpg", ".jpeg"]:
+                    st.image(
+                        str(rec_path),
+                        caption=f"Receipt: {rec_filename}",
+                        use_container_width=True,
+                    )
+                elif ext_file == ".pdf":
+                    with open(rec_path, "rb") as pdf_file:
+                        st.download_button(
+                            label=f"📄 Download PDF Receipt ({rec_filename})",
+                            data=pdf_file,
+                            file_name=rec_filename,
+                            mime="application/pdf",
+                        )
+
+# --- TAB 3: EDIT EXPENSE ---
+with tab3:
+    st.subheader(f"Edit Expense - Week {week_num}")
+    if not current_week["gastos"]:
+        st.info("No expenses recorded for this week to edit.")
+    else:
+        expense_options_edit = [
+            f"{i+1}. {g['producto']} (VES {g['precio']:.2f})"
+            for i, g in enumerate(current_week["gastos"])
+        ]
+        selected_expense_edit = st.selectbox(
+            "Select expense to edit:",
+            options=expense_options_edit,
+            key="select_edit_expense",
+        )
+
+        idx_edit = expense_options_edit.index(selected_expense_edit)
+        target_expense = current_week["gastos"][idx_edit]
+
+        current_receipt = target_expense.get("factura")
+        if current_receipt:
+            st.markdown("##### 📎 Current Attached Receipt:")
+            r_path_edit = CARPETA_ADJUNTOS / current_receipt
+            if r_path_edit.exists():
+                ext_edit = r_path_edit.suffix.lower()
+                if ext_edit in [".png", ".jpg", ".jpeg"]:
+                    st.image(str(r_path_edit), width=280)
+                elif ext_edit == ".pdf":
+                    with open(r_path_edit, "rb") as pdf_f:
+                        st.download_button(
+                            label="📄 Download Attached PDF Receipt",
+                            data=pdf_f,
+                            file_name=current_receipt,
+                            mime="application/pdf",
+                        )
+
+        with st.form("form_edit_compra"):
+            edit_product_name = st.text_input(
+                "Item or Service Name:", value=target_expense["producto"]
+            )
+            edit_price_ves = st.number_input(
+                "Price in Bolivars (VES):",
+                min_value=0.0,
+                value=float(target_expense["precio"]),
+                step=0.5,
+            )
+
+            edit_receipt_file = st.file_uploader(
+                "Replace Invoice / Receipt (optional):",
+                type=["png", "jpg", "jpeg", "pdf"],
+                key="uploader_edit_receipt",
+            )
+
+            btn_update = st.form_submit_button("💾 Save Changes")
+
+            if btn_update:
+                if not edit_product_name.strip():
+                    st.error("Please enter a product or service name.")
+                elif edit_price_ves <= 0:
+                    st.error("Price must be greater than 0.")
+                else:
+                    receipt_filename = target_expense.get("factura")
+
+                    if edit_receipt_file is not None:
+                        if receipt_filename:
+                            old_path = CARPETA_ADJUNTOS / receipt_filename
+                            if old_path.exists():
+                                try:
+                                    old_path.unlink()
+                                except Exception:
+                                    pass
+                        ext = Path(edit_receipt_file.name).suffix
+                        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                        receipt_filename = f"receipt_wk{week_num}_{timestamp}{ext}"
+                        with open(CARPETA_ADJUNTOS / receipt_filename, "wb") as f:
+                            f.write(edit_receipt_file.getbuffer())
+
+                    old_price = target_expense["precio"]
+                    current_week["total_gastado"] = (
+                        current_week["total_gastado"]
+                        - old_price
+                        + edit_price_ves
+                    )
+                    if current_week["total_gastado"] < 0:
+                        current_week["total_gastado"] = 0.0
+
+                    p_usdt = (
+                        round(edit_price_ves / current_rate, 2)
+                        if current_rate > 0
+                        else 0.0
+                    )
+
+                    target_expense["producto"] = edit_product_name
+                    target_expense["precio"] = edit_price_ves
+                    target_expense["precio_usdt"] = p_usdt
+                    target_expense["factura"] = receipt_filename
+
+                    save_data(data)
+                    st.success(f"✅ Successfully updated '{edit_product_name}'.")
+                    st.rerun()
+
+# --- TAB 4: FINANCIAL SETTINGS ---
+with tab4:
+    st.subheader("⚙️ Financial Settings")
+
+    col_a, col_b = st.columns(2)
+    with col_a:
+        st.markdown("##### 💵 Budget & Rollover")
+        new_budget = st.number_input(
+            "Weekly Budget ($ USDT):",
+            min_value=0.0,
+            value=float(current_week["presupuesto_base"]),
+            step=5.0,
+        )
+        new_rollover = st.number_input(
+            "Rollover / Savings ($ USDT):",
+            min_value=0.0,
+            value=float(current_week["remanente_anterior"]),
+            step=5.0,
+        )
+
+        if st.button("Save Budget Changes"):
+            current_week["presupuesto_base"] = new_budget
+            current_week["remanente_anterior"] = new_rollover
+
+            save_data(data)
+            st.success("✅ Budget and Rollover updated.")
+            st.rerun()
+
+    with col_b:
+        st.markdown("##### 🪙 USDT Exchange Rate")
+        manual_rate = st.number_input(
+            "Manual USDT Rate (VES):",
+            min_value=0.1,
+            value=float(st.session_state["tasa_usdt"]),
+            step=1.0,
+        )
+
+        col_b1, col_b2 = st.columns(2)
+        with col_b1:
+            if st.button("Apply Manual Rate"):
+                st.session_state["tasa_usdt"] = manual_rate
+                st.success(f"Rate set to VES {manual_rate:.2f}")
+                st.rerun()
+        with col_b2:
+            if st.button("🔄 Sync with Binance P2P"):
+                st.session_state["tasa_usdt"] = fetch_online_usdt_rate()
+                st.success("Rate updated from Binance P2P.")
+                st.rerun()
