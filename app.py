@@ -51,7 +51,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-ARCH_DB = Path("caja_chica.json")
+ARCH_DB = Path("caja_chica.json") #json no nos sirve para esto. necesitamos la base de datos en línea (supabase o la que sea).
 CARPETA_ADJUNTOS = Path("adjuntos")
 CARPETA_ADJUNTOS.mkdir(parents=True, exist_ok=True)
 
