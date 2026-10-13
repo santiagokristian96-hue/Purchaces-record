@@ -1,4 +1,4 @@
-import json
+import unicodedata
 from datetime import datetime
 from pathlib import Path
 import requests
@@ -7,6 +7,7 @@ from bs4 import BeautifulSoup
 import urllib3
 from supabase import create_client, Client
 
+getcontext().prec = 12
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # Web Page Configuration
