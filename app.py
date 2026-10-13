@@ -1,13 +1,11 @@
-import unicodedata
+import json
 from datetime import datetime
 from pathlib import Path
 import requests
 import streamlit as st
 from bs4 import BeautifulSoup
 import urllib3
-from supabase import create_client, Client
 
-#getcontext().prec = 12
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # Web Page Configuration
@@ -53,18 +51,9 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# ------------------------------------
-# SUPABASE CONNECTION SETUP
-# ------------------------------------
-try:
-    SUPABASE_URL = st.secrets["SUPABASE_URL"]
-    SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
-    supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
-except Exception as e:
-    st.error(
-        "⚠️ Error connecting to Supabase. Please configure SUPABASE_URL and SUPABASE_KEY in Streamlit Secrets."
-    )
-    st.stop()
+ARCH_DB = Path("caja_chica.json")
+CARPETA_ADJUNTOS = Path("adjuntos")
+CARPETA_ADJUNTOS.mkdir(parents=True, exist_ok=True)
 
 
 # ------------------------------------
@@ -120,34 +109,27 @@ def fetch_online_usdt_rate() -> float:
 
     return 100.00
 
+
 def get_current_real_week() -> int:
     current_iso_week = datetime.now().isocalendar()[1]
     return max(41, current_iso_week)
 
-def save_data(data):
-    try:
-        supabase.table("app_data").upsert(
-            {"id": 1, "content": data}
-        ).execute()
-    except Exception as e:
-        st.error(f"Error saving data to Supabase: {e}")
-        
-def load_data():
-    try:
-        response = (
-            supabase.table("app_data")
-            .select("content")
-            .eq("id", 1)
-            .execute()
-        )
-        if response.data and len(response.data) > 0:
-            return response.data[0]["content"]
-    except Exception:
-        pass
 
-    default_data = {"semanas": [], "pending_purchases": []}
-    save_data(default_data)
-    return default_data
+def load_data():
+    if ARCH_DB.exists():
+        with open(ARCH_DB, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            if "semanas" not in data:
+                data["semanas"] = []
+            if "pending_purchases" not in data:
+                data["pending_purchases"] = []
+            return data
+    return {"semanas": [], "pending_purchases": []}
+
+
+def save_data(data):
+    with open(ARCH_DB, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=4, ensure_ascii=False)
 
 
 def get_or_create_week(
@@ -168,7 +150,6 @@ def get_or_create_week(
         rate = st.session_state.get("tasa_usdt", 100.00)
         spent_usdt = prev["total_gastado"] / rate if rate > 0 else 0
         
-        # Calculate prev available
         prev_is_funded = prev.get("budget_funded", False)
         prev_base = prev["presupuesto_base"] if prev_is_funded else 0.0
         prev_available = prev_base + prev["remanente_anterior"]
@@ -398,7 +379,7 @@ st.markdown(
 )
 
 # ------------------------------------
-# FUNDING CONTROL BUTTON (PROCESSED FIRST)
+# FUNDING CONTROL BUTTON
 # ------------------------------------
 is_funded = current_week.get("budget_funded", False)
 
@@ -425,7 +406,7 @@ with c_fund2:
 st.markdown("<br>", unsafe_allow_html=True)
 
 # ------------------------------------
-# CALCULATE METRICS AFTER FUNDING ACTION
+# CALCULATE METRICS
 # ------------------------------------
 is_funded = current_week.get("budget_funded", False)
 base_amount = current_week["presupuesto_base"] if is_funded else 0.0
@@ -532,11 +513,8 @@ with tab1:
                     ext = Path(receipt_file.name).suffix
                     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                     receipt_filename = f"receipt_wk{week_num}_{timestamp}{ext}"
-                    
-                    file_bytes = receipt_file.getvalue()
-                    supabase.storage.from_("receipts").upload(
-                        receipt_filename, file_bytes, file_options={"upsert": "true"}
-                    )
+                    with open(CARPETA_ADJUNTOS / receipt_filename, "wb") as f:
+                        f.write(receipt_file.getbuffer())
 
                 p_usdt = (
                     round(price_ves / current_rate, 2)
@@ -603,26 +581,24 @@ with tab2:
 
             idx_rec = receipt_options.index(selected_receipt_item)
             rec_filename = expenses_with_receipts[idx_rec]["factura"]
-            
-            try:
-                public_url = supabase.storage.from_("receipts").get_public_url(rec_filename)
-                ext_file = Path(rec_filename).suffix.lower()
+            rec_path = CARPETA_ADJUNTOS / rec_filename
+
+            if rec_path.exists():
+                ext_file = rec_path.suffix.lower()
                 if ext_file in [".png", ".jpg", ".jpeg"]:
                     st.image(
-                        public_url,
+                        str(rec_path),
                         caption=f"Receipt: {rec_filename}",
                         use_container_width=True,
                     )
                 elif ext_file == ".pdf":
-                    file_res = supabase.storage.from_("receipts").download(rec_filename)
-                    st.download_button(
-                        label=f"📄 Download PDF Receipt ({rec_filename})",
-                        data=file_res,
-                        file_name=rec_filename,
-                        mime="application/pdf",
-                    )
-            except Exception as e:
-                st.error(f"Could not load receipt file: {e}")
+                    with open(rec_path, "rb") as pdf_file:
+                        st.download_button(
+                            label=f"📄 Download PDF Receipt ({rec_filename})",
+                            data=pdf_file,
+                            file_name=rec_filename,
+                            mime="application/pdf",
+                        )
 
 # --- TAB 3: EDIT EXPENSE ---
 with tab3:
@@ -646,21 +622,19 @@ with tab3:
         current_receipt = target_expense.get("factura")
         if current_receipt:
             st.markdown("##### 📎 Current Attached Receipt:")
-            try:
-                public_url_edit = supabase.storage.from_("receipts").get_public_url(current_receipt)
-                ext_edit = Path(current_receipt).suffix.lower()
+            r_path_edit = CARPETA_ADJUNTOS / current_receipt
+            if r_path_edit.exists():
+                ext_edit = r_path_edit.suffix.lower()
                 if ext_edit in [".png", ".jpg", ".jpeg"]:
-                    st.image(public_url_edit, width=280)
+                    st.image(str(r_path_edit), width=280)
                 elif ext_edit == ".pdf":
-                    file_res_edit = supabase.storage.from_("receipts").download(current_receipt)
-                    st.download_button(
-                        label="📄 Download Attached PDF Receipt",
-                        data=file_res_edit,
-                        file_name=current_receipt,
-                        mime="application/pdf",
-                    )
-            except Exception:
-                pass
+                    with open(r_path_edit, "rb") as pdf_f:
+                        st.download_button(
+                            label="📄 Download Attached PDF Receipt",
+                            data=pdf_f,
+                            file_name=current_receipt,
+                            mime="application/pdf",
+                        )
 
         with st.form("form_edit_compra"):
             edit_product_name = st.text_input(
@@ -670,103 +644,4 @@ with tab3:
                 "Price in Bolivars (VES):",
                 min_value=0.0,
                 value=float(target_expense["precio"]),
-                step=0.5,
-            )
-
-            edit_receipt_file = st.file_uploader(
-                "Replace Invoice / Receipt (optional):",
-                type=["png", "jpg", "jpeg", "pdf"],
-                key="uploader_edit_receipt",
-            )
-
-            btn_update = st.form_submit_button("💾 Save Changes")
-
-            if btn_update:
-                if not edit_product_name.strip():
-                    st.error("Please enter a product or service name.")
-                elif edit_price_ves <= 0:
-                    st.error("Price must be greater than 0.")
-                else:
-                    receipt_filename = target_expense.get("factura")
-
-                    if edit_receipt_file is not None:
-                        ext = Path(edit_receipt_file.name).suffix
-                        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                        receipt_filename = f"receipt_wk{week_num}_{timestamp}{ext}"
-                        file_bytes = edit_receipt_file.getvalue()
-                        supabase.storage.from_("receipts").upload(
-                            receipt_filename, file_bytes, file_options={"upsert": "true"}
-                        )
-
-                    old_price = target_expense["precio"]
-                    current_week["total_gastado"] = (
-                        current_week["total_gastado"]
-                        - old_price
-                        + edit_price_ves
-                    )
-                    if current_week["total_gastado"] < 0:
-                        current_week["total_gastado"] = 0.0
-
-                    p_usdt = (
-                        round(edit_price_ves / current_rate, 2)
-                        if current_rate > 0
-                        else 0.0
-                    )
-
-                    target_expense["producto"] = edit_product_name
-                    target_expense["precio"] = edit_price_ves
-                    target_expense["precio_usdt"] = p_usdt
-                    target_expense["factura"] = receipt_filename
-
-                    save_data(data)
-                    st.success(f"✅ Successfully updated '{edit_product_name}'.")
-                    st.rerun()
-
-# --- TAB 4: FINANCIAL SETTINGS ---
-with tab4:
-    st.subheader("⚙️ Financial Settings")
-
-    col_a, col_b = st.columns(2)
-    with col_a:
-        st.markdown("##### 💵 Budget & Rollover")
-        new_budget = st.number_input(
-            "Weekly Budget ($ USDT):",
-            min_value=0.0,
-            value=float(current_week["presupuesto_base"]),
-            step=5.0,
-        )
-        new_rollover = st.number_input(
-            "Rollover / Savings ($ USDT):",
-            min_value=0.0,
-            value=float(current_week["remanente_anterior"]),
-            step=5.0,
-        )
-
-        if st.button("Save Budget Changes"):
-            current_week["presupuesto_base"] = new_budget
-            current_week["remanente_anterior"] = new_rollover
-
-            save_data(data)
-            st.success("✅ Budget and Rollover updated.")
-            st.rerun()
-
-    with col_b:
-        st.markdown("##### 🪙 USDT Exchange Rate")
-        manual_rate = st.number_input(
-            "Manual USDT Rate (VES):",
-            min_value=0.1,
-            value=float(st.session_state["tasa_usdt"]),
-            step=1.0,
-        )
-
-        col_b1, col_b2 = st.columns(2)
-        with col_b1:
-            if st.button("Apply Manual Rate"):
-                st.session_state["tasa_usdt"] = manual_rate
-                st.success(f"Rate set to VES {manual_rate:.2f}")
-                st.rerun()
-        with col_b2:
-            if st.button("🔄 Sync with Binance P2P"):
-                st.session_state["tasa_usdt"] = fetch_online_usdt_rate()
-                st.success("Rate updated from Binance P2P.")
-                st.rerun()
+                step=0
