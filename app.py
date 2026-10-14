@@ -158,7 +158,7 @@ def save_data(data):
         try:
             supabase.table("app_data").upsert({"id": 1, "content": data}).execute()
         except Exception as e:
-            st.warning(f"Note: Saved locally. Supabase sync error: {e}")
+            st.warning(f"Saved locally. Supabase sync error: {e}")
 
 
 def get_or_create_week(data, week_num, base_budget=25.0, initial_savings=60.0):
@@ -797,4 +797,113 @@ with tab3:
                     except Exception:
                         pass
 
-        with st.form("form_edit_compra
+        with st.form("form_edit_compra"):
+            edit_product_name = st.text_input("Item or Service Name:", value=target_expense["producto"])
+            edit_price_ves = st.number_input(
+                "Price in Bolivars (VES):",
+                min_value=0.0,
+                value=float(target_expense["precio"]),
+                step=0.5,
+            )
+
+            edit_receipt_files = st.file_uploader(
+                "Replace Invoices / Receipts (up to 3 files):",
+                type=["png", "jpg", "jpeg", "pdf"],
+                accept_multiple_files=True,
+                key="uploader_edit_receipt",
+            )
+
+            btn_update = st.form_submit_button("💾 Save Changes")
+
+            if btn_update:
+                if not edit_product_name.strip():
+                    st.error("Please enter a product or service name.")
+                elif edit_price_ves <= 0:
+                    st.error("Price must be greater than 0.")
+                else:
+                    receipt_filenames = current_receipts
+
+                    if edit_receipt_files:
+                        if len(edit_receipt_files) > 3:
+                            edit_receipt_files = edit_receipt_files[:3]
+                        
+                        receipt_filenames = []
+                        for rf in edit_receipt_files:
+                            ext = Path(rf.name).suffix
+                            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+                            r_name = f"receipt_wk{week_num}_{timestamp}{ext}"
+                            if supabase is not None:
+                                try:
+                                    file_bytes = rf.getvalue()
+                                    supabase.storage.from_("receipts").upload(
+                                        r_name, file_bytes, file_options={"upsert": "true"}
+                                    )
+                                except Exception:
+                                    pass
+                            receipt_filenames.append(r_name)
+
+                    old_price = target_expense["precio"]
+                    current_week["total_gastado"] = current_week["total_gastado"] - old_price + edit_price_ves
+                    if current_week["total_gastado"] < 0:
+                        current_week["total_gastado"] = 0.0
+
+                    p_usdt = round(edit_price_ves / current_rate, 2) if current_rate > 0 else 0.0
+
+                    target_expense["producto"] = edit_product_name
+                    target_expense["precio"] = edit_price_ves
+                    target_expense["precio_usdt"] = p_usdt
+                    target_expense["factura"] = receipt_filenames[0] if receipt_filenames else None
+                    target_expense["facturas"] = receipt_filenames
+
+                    save_data(data)
+                    st.success(f"✅ Successfully updated '{edit_product_name}'.")
+                    st.rerun()
+
+# --- TAB 4: FINANCIAL SETTINGS ---
+with tab4:
+    st.subheader("⚙️ Financial Settings")
+
+    col_a, col_b = st.columns(2)
+    with col_a:
+        st.markdown("##### 💵 Budget & Rollover")
+        new_budget = st.number_input(
+            "Weekly Budget ($ USDT):",
+            min_value=0.0,
+            value=float(current_week["presupuesto_base"]),
+            step=5.0,
+        )
+        new_rollover = st.number_input(
+            "Rollover / Savings ($ USDT):",
+            min_value=0.0,
+            value=float(current_week["remanente_anterior"]),
+            step=5.0,
+        )
+
+        if st.button("Save Budget Changes"):
+            current_week["presupuesto_base"] = new_budget
+            current_week["remanente_anterior"] = new_rollover
+
+            save_data(data)
+            st.success("✅ Budget and Rollover updated.")
+            st.rerun()
+
+    with col_b:
+        st.markdown("##### 🪙 USDT Exchange Rate")
+        manual_rate = st.number_input(
+            "Manual USDT Rate (VES):",
+            min_value=0.1,
+            value=float(st.session_state["tasa_usdt"]),
+            step=1.0,
+        )
+
+        col_b1, col_b2 = st.columns(2)
+        with col_b1:
+            if st.button("Apply Manual Rate"):
+                st.session_state["tasa_usdt"] = manual_rate
+                st.success(f"Rate set to VES {manual_rate:.2f}")
+                st.rerun()
+        with col_b2:
+            if st.button("🔄 Sync with Binance P2P"):
+                st.session_state["tasa_usdt"] = fetch_online_usdt_rate()
+                st.success("Rate updated from Binance P2P.")
+                st.rerun()
