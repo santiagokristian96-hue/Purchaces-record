@@ -221,34 +221,44 @@ def generate_pdf_report(week_data, rate):
     story.append(Paragraph(f"USDT Exchange Rate: <b>VES {rate:.2f}</b>", sub_style))
     story.append(Spacer(1, 15))
 
+    # Calculations for PDF Summary
     is_funded = week_data.get("budget_funded", False)
     funded_text = "Funded" if is_funded else "Not Funded"
-    total_spent_usdt = week_data["total_gastado"] / rate if rate > 0 else 0.0
+    
+    total_spent_ves = week_data["total_gastado"]
+    total_spent_usdt = total_spent_ves / rate if rate > 0 else 0.0
+    
+    base_amount = week_data["presupuesto_base"] if is_funded else 0.0
+    week_data["presupuesto_disponible"] = base_amount + week_data["remanente_anterior"]
+    
     rem_usdt = week_data["presupuesto_disponible"] - total_spent_usdt
     rem_ves = rem_usdt * rate
 
     summary_data = [
-        ["Weekly Budget", "Rollover / Savings", "Status", "Total Spent", "Available Balance"],
+        ["Weekly Budget", "Rollover / Savings", "Status", "Total Spent (Gastado)", "Available Balance (Disponible)"],
         [
             f"${week_data['presupuesto_base']:.2f} USDT",
             f"${week_data['remanente_anterior']:.2f} USDT",
             funded_text,
-            f"${total_spent_usdt:.2f} USDT\n(VES {week_data['total_gastado']:.2f})",
+            f"${total_spent_usdt:.2f} USDT\n(VES {total_spent_ves:.2f})",
             f"${rem_usdt:.2f} USDT\n(VES {rem_ves:.2f})",
         ],
     ]
 
-    summary_table = Table(summary_data, colWidths=[100, 110, 80, 120, 130])
+    summary_table = Table(summary_data, colWidths=[95, 100, 65, 135, 145])
     summary_table.setStyle(
         TableStyle(
             [
                 ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1e222d")),
                 ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
                 ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
                 ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-                ("FONTSIZE", (0, 0), (-1, -1), 9),
+                ("FONTSIZE", (0, 0), (-1, -1), 8.5),
                 ("BOTTOMPADDING", (0, 0), (-1, 0), 6),
                 ("BACKGROUND", (0, 1), (-1, 1), colors.HexColor("#f4f6f9")),
+                ("TEXTCOLOR", (3, 1), (3, 1), colors.HexColor("#d9534f")),
+                ("TEXTCOLOR", (4, 1), (4, 1), colors.HexColor("#28a745")),
                 ("GRID", (0, 0), (-1, -1), 1, colors.HexColor("#cccccc")),
             ]
         )
@@ -907,3 +917,4 @@ with tab4:
                 st.session_state["tasa_usdt"] = fetch_online_usdt_rate()
                 st.success("Rate updated from Binance P2P.")
                 st.rerun()
+                
