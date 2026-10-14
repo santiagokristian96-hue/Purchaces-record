@@ -7,6 +7,13 @@ from bs4 import BeautifulSoup
 import urllib3
 import base64
 import os
+from supabase import create_client, Client
+
+
+# Inicializar cliente de Supabase usando los secretos de Streamlit (.streamlit/secrets.toml)
+NG_SUPABASE_URL="https://aswdqhmityjxyerblsfo.supabase.co"
+NG_SUPABASE_KEY="sb_publishable_zOQEgkqE7PcpsqTOFUWN2w_Om3JjrxJ"
+supabase: Client = create_client(NG_SUPABASE_URL, NG_SUPABASE_KEY)
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 #=====================
@@ -61,6 +68,75 @@ st.markdown(
 """,
     unsafe_allow_html=True,
 )
+
+#================================
+#     BLOQUE DE PERSISTENCIA
+#================================
+def load_data():
+    """Carga todas las semanas, sus gastos y compras pendientes desde Supabase."""
+    try:
+        # Cargar semanas
+        res_semanas = supabase.table("semanas").select("*").order("numero").execute()
+        semanas = res_semanas.data if res_semanas.data else []
+        
+        # Cargar los gastos asociados a cada semana
+        for sem in semanas:
+            res_gastos = supabase.table("gastos").select("*").eq("semana_numero", sem["numero"]).execute()
+            sem["gastos"] = res_gastos.data if res_gastos.data else []
+
+        # Cargar compras pendientes
+        res_pending = supabase.table("pending_purchases").select("*").execute()
+        pending_purchases = res_pending.data if res_pending.data else []
+
+        return {"semanas": semanas, "pending_purchases": pending_purchases}
+    except Exception as e:
+        st.error(f"Error conectando a Supabase: {e}")
+        return {"semanas": [], "pending_purchases": []}
+
+def save_data(week_data):
+    """Guarda o actualiza una semana completa en Supabase."""
+    try:
+        # Insertar o actualizar la semana principal
+        data_semana = {
+            "numero": week_data["numero"],
+            "presupuesto_base": week_data["presupuesto_base"],
+            "remanente_anterior": week_data["remanente_anterior"],
+            "budget_funded": week_data["budget_funded"],
+            "presupuesto_disponible": week_data["presupuesto_disponible"],
+            "total_gastado": week_data["total_gastado"]
+        }
+        supabase.table("semanas").upsert(data_semana, on_conflict="numero").execute()
+    except Exception as e:
+        st.error(f"Error guardando la semana: {e}")
+
+def add_expense_to_supabase(week_num, expense_data, receipt_file=None):
+    """Agrega un gasto a la semana y sube el recibo al Storage si existe."""
+    receipt_url = None
+    if receipt_file is not None:
+        try:
+            ext = Path(receipt_file.name).suffix
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"receipt_wk{week_num}_{timestamp}{ext}"
+            
+            # Subir archivo al bucket 'recibos' en Supabase Storage
+            file_bytes = receipt_file.getvalue()
+            supabase.storage.from_("recibos").upload(filename, file_bytes, {"upsert": "true"})
+            
+            # Obtener URL pública del archivo
+            receipt_url = supabase.storage.from_("recibos").get_public_url(filename)
+        except Exception as e:
+            st.warning(f"No se pudo subir el archivo adjunto: {e}")
+
+    # Insertar el gasto en la tabla de Supabase
+    data_gasto = {
+        "semana_numero": week_num,
+        "producto": expense_data["producto"],
+        "precio": expense_data["precio"],
+        "precio_usdt": expense_data["precio_usdt"],
+        "factura": receipt_url,
+        "fecha": datetime.now().strftime("%Y-%m-%d")
+    }
+    supabase.table("gastos").insert(data_gasto).execute()
 
 ARCH_DB = Path("caja_chica.json") #json no nos sirve para esto. necesitamos la base de datos en línea (supabase o la que sea).
 CARPETA_ADJUNTOS = Path("adjuntos")
@@ -119,25 +195,9 @@ def fetch_online_usdt_rate() -> float:
 
     return 100.00
 
-
 def get_current_real_week() -> int:
     current_iso_week = datetime.now().isocalendar()[1]
     return max(41, current_iso_week)
-
-def load_data():
-    if ARCH_DB.exists():
-        with open(ARCH_DB, "r", encoding="utf-8") as f:
-            data = json.load(f)
-            if "semanas" not in data:
-                data["semanas"] = []
-            if "pending_purchases" not in data:
-                data["pending_purchases"] = []
-            return data
-    return {"semanas": [], "pending_purchases": []}
-
-def save_data(data):
-    with open(ARCH_DB, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=4, ensure_ascii=False)
 
 def get_or_create_week(
     data, week_num, base_budget=25.0, initial_savings=60.0
@@ -175,6 +235,19 @@ def get_or_create_week(
     save_data(data)
     return new_week
 
+def save_pending_purchase(item, priority):
+    """Guarda una compra pendiente en Supabase."""
+    data_pending = {
+        "item": item,
+        "priority": priority,
+        "notes": "",
+        "date_added": datetime.now().strftime("%Y-%m-%d")
+    }
+    supabase.table("pending_purchases").insert(data_pending).execute()
+
+def delete_pending_purchase(item_id):
+    """Elimina una compra pendiente de Supabase."""
+    supabase.table("pending_purchases").delete().eq("id", item_id).execute()
 
 # ------------------------------------
 # STATE & AUTHENTICATION INITIALIZATION
@@ -196,7 +269,7 @@ data = load_data()
 # LOGIN SCREEN (IF NOT AUTHENTICATED)
 # ------------------------------------
 if not st.session_state["authenticated"]:
-    st.sidebar.markdown(f"""
+    st.markdown(f"""
                 <div style="text-align: center; margin-bottom: 40px;">
                     <img src="data:image/jpg;base64,{NG_LOGO_BASE64}" width="880" style="border-radius: 16px;">
                 </div>
@@ -770,3 +843,6 @@ with tab4:
                 st.session_state["tasa_usdt"] = fetch_online_usdt_rate()
                 st.success("Rate updated from Binance P2P.")
                 st.rerun()
+
+if __name__ == "__main__":
+    load_data()
