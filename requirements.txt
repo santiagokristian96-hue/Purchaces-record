@@ -11,3 +11,8 @@ streamlit
 requests
 beautifulsoup4
 reportlab
+streamlit
+requests
+beautifulsoup4
+supabase
+reportlab
