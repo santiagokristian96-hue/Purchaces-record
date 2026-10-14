@@ -10,9 +10,9 @@ import base64
 import os
 from supabase import create_client, Client
 
-# ReportLab imports for PDF generation
+# ReportLab imports for PDF generation with embedded images
 from reportlab.lib.pagesizes import letter
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image as RLImage
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib import colors
 
@@ -292,22 +292,39 @@ def generate_pdf_report(week_data, rate):
     if not expenses:
         story.append(Paragraph("No expenses recorded for this week.", styles["Normal"]))
     else:
-        item_table_data = [["#", "Item / Service Name", "Price (VES)", "Price (USDT)", "Receipts", "Date & Time"]]
+        item_table_data = [["#", "Item / Service Name", "Price (VES)", "Price (USDT)", "Receipt Images / Files", "Date & Time"]]
         for idx, g in enumerate(expenses, 1):
             p_usdt = g.get("precio_usdt", g["precio"] / rate if rate > 0 else 0)
             receipts = g.get("facturas", [g.get("factura")] if g.get("factura") else [])
             receipts = [r for r in receipts if r]
-            att_count = f"{len(receipts)} file(s)" if receipts else "None"
+            
+            # Process attached images for PDF embedding
+            img_elements = []
+            for r_file in receipts:
+                local_path = CARPETA_ADJUNTOS / r_file
+                ext_file = Path(r_file).suffix.lower()
+                
+                if local_path.exists() and ext_file in [".png", ".jpg", ".jpeg"]:
+                    try:
+                        rl_img = RLImage(str(local_path), width=50, height=50)
+                        img_elements.append(rl_img)
+                    except Exception:
+                        pass
+                elif ext_file == ".pdf":
+                    img_elements.append(Paragraph("📄 PDF File", styles["Normal"]))
+
+            receipt_cell = img_elements if img_elements else "None"
+
             item_table_data.append([
                 str(idx),
                 g["producto"],
                 f"VES {g['precio']:.2f}",
                 f"${p_usdt:.2f}",
-                att_count,
+                receipt_cell,
                 g["fecha"],
             ])
 
-        expense_table = Table(item_table_data, colWidths=[25, 180, 90, 80, 65, 100])
+        expense_table = Table(item_table_data, colWidths=[20, 140, 80, 70, 130, 100])
         expense_table.setStyle(
             TableStyle(
                 [
@@ -316,8 +333,9 @@ def generate_pdf_report(week_data, rate):
                     ("ALIGN", (0, 0), (-1, -1), "LEFT"),
                     ("ALIGN", (0, 0), (0, -1), "CENTER"),
                     ("ALIGN", (2, 0), (3, -1), "RIGHT"),
+                    ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
                     ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-                    ("FONTSIZE", (0, 0), (-1, -1), 8.5),
+                    ("FONTSIZE", (0, 0), (-1, -1), 8),
                     ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#dddddd")),
                 ]
             )
