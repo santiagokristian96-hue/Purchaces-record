@@ -80,6 +80,23 @@ st.markdown(
         color: #00ff88;
         font-size: 14px;
     }
+    .compress-btn {
+        display: inline-block;
+        background-color: #2b3245;
+        color: #00d2ff !important;
+        padding: 8px 14px;
+        border-radius: 6px;
+        text-decoration: none;
+        font-weight: 600;
+        font-size: 13px;
+        border: 1px solid #00d2ff;
+        margin-top: 5px;
+        margin-bottom: 10px;
+    }
+    .compress-btn:hover {
+        background-color: #00d2ff;
+        color: #0e1117 !important;
+    }
 </style>
 """,
     unsafe_allow_html=True,
@@ -619,6 +636,11 @@ with tab1:
             accept_multiple_files=True,
         )
 
+        st.markdown(
+            '<a href="https://www.iloveimg.com/es/comprimir-imagen" target="_blank" class="compress-btn">🗜️ ¿Foto muy pesada? Comprímela gratis aquí antes de subirla</a>',
+            unsafe_allow_html=True,
+        )
+
         if receipt_files:
             if len(receipt_files) > 3:
                 st.warning("⚠️ Maximum 3 files allowed. Only the first 3 will be saved.")
@@ -646,12 +668,10 @@ with tab1:
                         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
                         r_name = f"receipt_wk{week_num}_{timestamp}{ext}"
                         
-                        # Save locally to ensure files are always available immediately
                         local_path = CARPETA_ADJUNTOS / r_name
                         with open(local_path, "wb") as f:
                             f.write(rf.getbuffer())
 
-                        # Try uploading to Supabase if available
                         if supabase is not None:
                             try:
                                 supabase.storage.from_("receipts").upload(
@@ -856,6 +876,11 @@ with tab3:
                 key="uploader_edit_receipt",
             )
 
+            st.markdown(
+                '<a href="https://www.iloveimg.com/es/comprimir-imagen" target="_blank" class="compress-btn">🗜️ ¿Foto muy pesada? Comprímela gratis aquí antes de subirla</a>',
+                unsafe_allow_html=True,
+            )
+
             btn_update = st.form_submit_button("💾 Save Changes")
 
             if btn_update:
@@ -876,7 +901,6 @@ with tab3:
                             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
                             r_name = f"receipt_wk{week_num}_{timestamp}{ext}"
                             
-                            # Save locally
                             local_path_new = CARPETA_ADJUNTOS / r_name
                             with open(local_path_new, "wb") as f:
                                 f.write(rf.getbuffer())
