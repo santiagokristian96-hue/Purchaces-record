@@ -30,7 +30,7 @@ except Exception:
     supabase = None
 
 # =====================
-# CÓDIGO LOGO
+# CÓDIGO LOGO Y CARPETA LOCAL
 # =====================
 logo_NG = "logo.txt"
 if os.path.exists(logo_NG):
@@ -38,6 +38,9 @@ if os.path.exists(logo_NG):
         NG_LOGO_BASE64 = f.read().strip()
 else:
     NG_LOGO_BASE64 = ""
+
+CARPETA_ADJUNTOS = Path("adjuntos")
+CARPETA_ADJUNTOS.mkdir(parents=True, exist_ok=True)
 
 # Web Page Configuration
 st.set_page_config(
@@ -221,7 +224,6 @@ def generate_pdf_report(week_data, rate):
     story.append(Paragraph(f"USDT Exchange Rate: <b>VES {rate:.2f}</b>", sub_style))
     story.append(Spacer(1, 15))
 
-    # Calculations for PDF Summary
     is_funded = week_data.get("budget_funded", False)
     funded_text = "Funded" if is_funded else "Not Funded"
     
@@ -644,11 +646,16 @@ with tab1:
                         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
                         r_name = f"receipt_wk{week_num}_{timestamp}{ext}"
                         
+                        # Save locally to ensure files are always available immediately
+                        local_path = CARPETA_ADJUNTOS / r_name
+                        with open(local_path, "wb") as f:
+                            f.write(rf.getbuffer())
+
+                        # Try uploading to Supabase if available
                         if supabase is not None:
                             try:
-                                file_bytes = rf.getvalue()
                                 supabase.storage.from_("receipts").upload(
-                                    r_name, file_bytes, file_options={"upsert": "true"}
+                                    r_name, rf.getvalue(), file_options={"upsert": "true"}
                                 )
                             except Exception:
                                 pass
@@ -750,9 +757,22 @@ with tab2:
                 for r_idx, rec_filename in enumerate(rec_files):
                     with cols_rec[r_idx]:
                         try:
-                            if supabase is not None:
+                            local_path = CARPETA_ADJUNTOS / rec_filename
+                            ext_file = Path(rec_filename).suffix.lower()
+                            
+                            if local_path.exists():
+                                if ext_file in [".png", ".jpg", ".jpeg"]:
+                                    st.image(str(local_path), caption=f"File {r_idx+1}", width=150)
+                                elif ext_file == ".pdf":
+                                    with open(local_path, "rb") as pdf_f:
+                                        st.download_button(
+                                            label=f"📄 Download PDF {r_idx+1}",
+                                            data=pdf_f,
+                                            file_name=rec_filename,
+                                            mime="application/pdf",
+                                        )
+                            elif supabase is not None:
                                 public_url = supabase.storage.from_("receipts").get_public_url(rec_filename)
-                                ext_file = Path(rec_filename).suffix.lower()
                                 if ext_file in [".png", ".jpg", ".jpeg"]:
                                     st.image(public_url, caption=f"File {r_idx+1}", width=150)
                                 elif ext_file == ".pdf":
@@ -791,9 +811,22 @@ with tab3:
             for cr_idx, cr_file in enumerate(current_receipts):
                 with cols_edit_prev[cr_idx]:
                     try:
-                        if supabase is not None:
+                        local_path_edit = CARPETA_ADJUNTOS / cr_file
+                        ext_edit = Path(cr_file).suffix.lower()
+                        
+                        if local_path_edit.exists():
+                            if ext_edit in [".png", ".jpg", ".jpeg"]:
+                                st.image(str(local_path_edit), width=130)
+                            elif ext_edit == ".pdf":
+                                with open(local_path_edit, "rb") as pdf_f_edit:
+                                    st.download_button(
+                                        label=f"📄 Download PDF {cr_idx+1}",
+                                        data=pdf_f_edit,
+                                        file_name=cr_file,
+                                        mime="application/pdf",
+                                    )
+                        elif supabase is not None:
                             public_url_edit = supabase.storage.from_("receipts").get_public_url(cr_file)
-                            ext_edit = Path(cr_file).suffix.lower()
                             if ext_edit in [".png", ".jpg", ".jpeg"]:
                                 st.image(public_url_edit, width=130)
                             elif ext_edit == ".pdf":
@@ -842,11 +875,16 @@ with tab3:
                             ext = Path(rf.name).suffix
                             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
                             r_name = f"receipt_wk{week_num}_{timestamp}{ext}"
+                            
+                            # Save locally
+                            local_path_new = CARPETA_ADJUNTOS / r_name
+                            with open(local_path_new, "wb") as f:
+                                f.write(rf.getbuffer())
+
                             if supabase is not None:
                                 try:
-                                    file_bytes = rf.getvalue()
                                     supabase.storage.from_("receipts").upload(
-                                        r_name, file_bytes, file_options={"upsert": "true"}
+                                        r_name, rf.getvalue(), file_options={"upsert": "true"}
                                     )
                                 except Exception:
                                     pass
@@ -917,4 +955,3 @@ with tab4:
                 st.session_state["tasa_usdt"] = fetch_online_usdt_rate()
                 st.success("Rate updated from Binance P2P.")
                 st.rerun()
-                
