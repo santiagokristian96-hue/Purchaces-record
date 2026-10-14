@@ -9,16 +9,18 @@ import base64
 import os
 from supabase import create_client, Client
 
-
-# Inicializar cliente de Supabase usando los secretos de Streamlit (.streamlit/secrets.toml)
-NG_SUPABASE_URL="https://aswdqhmityjxyerblsfo.supabase.co"
-NG_SUPABASE_KEY="sb_publishable_zOQEgkqE7PcpsqTOFUWN2w_Om3JjrxJ"
+# ========================================
+# CONFIGURACIÓN DE SUPABASE (SIN SECRETOS)
+# ========================================
+NG_SUPABASE_URL = "https://aswdqhmityjxyerblsfo.supabase.co"
+NG_SUPABASE_KEY = "sb_publishable_zOQEgkqE7PcpsqTOFUWN2w_Om3JjrxJ"
 supabase: Client = create_client(NG_SUPABASE_URL, NG_SUPABASE_KEY)
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-#=====================
+
+# =====================
 #    CÓDIGO LOGO
-#=====================
+# =====================
 logo_NG = "logo.txt"
 if os.path.exists(logo_NG):
     with open(logo_NG, "r") as f:
@@ -69,22 +71,19 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-#================================
-#     BLOQUE DE PERSISTENCIA
-#================================
+# ====================================
+#     BLOQUE DE PERSISTENCIA (SUPABASE)
+# ====================================
 def load_data():
     """Carga todas las semanas, sus gastos y compras pendientes desde Supabase."""
     try:
-        # Cargar semanas
         res_semanas = supabase.table("semanas").select("*").order("numero").execute()
         semanas = res_semanas.data if res_semanas.data else []
         
-        # Cargar los gastos asociados a cada semana
         for sem in semanas:
             res_gastos = supabase.table("gastos").select("*").eq("semana_numero", sem["numero"]).execute()
             sem["gastos"] = res_gastos.data if res_gastos.data else []
 
-        # Cargar compras pendientes
         res_pending = supabase.table("pending_purchases").select("*").execute()
         pending_purchases = res_pending.data if res_pending.data else []
 
@@ -93,10 +92,9 @@ def load_data():
         st.error(f"Error conectando a Supabase: {e}")
         return {"semanas": [], "pending_purchases": []}
 
-def save_data(week_data):
-    """Guarda o actualiza una semana completa en Supabase."""
+def save_week_to_supabase(week_data):
+    """Guarda o actualiza una semana individual en Supabase."""
     try:
-        # Insertar o actualizar la semana principal
         data_semana = {
             "numero": week_data["numero"],
             "presupuesto_base": week_data["presupuesto_base"],
@@ -110,7 +108,7 @@ def save_data(week_data):
         st.error(f"Error guardando la semana: {e}")
 
 def add_expense_to_supabase(week_num, expense_data, receipt_file=None):
-    """Agrega un gasto a la semana y sube el recibo al Storage si existe."""
+    """Agrega un gasto a la tabla 'gastos' en Supabase y sube el recibo al Storage si existe."""
     receipt_url = None
     if receipt_file is not None:
         try:
@@ -118,16 +116,12 @@ def add_expense_to_supabase(week_num, expense_data, receipt_file=None):
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             filename = f"receipt_wk{week_num}_{timestamp}{ext}"
             
-            # Subir archivo al bucket 'recibos' en Supabase Storage
             file_bytes = receipt_file.getvalue()
             supabase.storage.from_("recibos").upload(filename, file_bytes, {"upsert": "true"})
-            
-            # Obtener URL pública del archivo
             receipt_url = supabase.storage.from_("recibos").get_public_url(filename)
         except Exception as e:
             st.warning(f"No se pudo subir el archivo adjunto: {e}")
 
-    # Insertar el gasto en la tabla de Supabase
     data_gasto = {
         "semana_numero": week_num,
         "producto": expense_data["producto"],
@@ -138,7 +132,18 @@ def add_expense_to_supabase(week_num, expense_data, receipt_file=None):
     }
     supabase.table("gastos").insert(data_gasto).execute()
 
-ARCH_DB = Path("caja_chica.json") #json no nos sirve para esto. necesitamos la base de datos en línea (supabase o la que sea).
+def save_pending_purchase(item, priority):
+    data_pending = {
+        "item": item,
+        "priority": priority,
+        "notes": "",
+        "date_added": datetime.now().strftime("%Y-%m-%d")
+    }
+    supabase.table("pending_purchases").insert(data_pending).execute()
+
+def delete_pending_purchase(item_id):
+    supabase.table("pending_purchases").delete().eq("id", item_id).execute()
+
 CARPETA_ADJUNTOS = Path("adjuntos")
 CARPETA_ADJUNTOS.mkdir(parents=True, exist_ok=True)
 
@@ -232,22 +237,8 @@ def get_or_create_week(
         "total_gastado": 0.0,
     }
     data["semanas"].append(new_week)
-    save_data(data)
+    save_week_to_supabase(new_week)
     return new_week
-
-def save_pending_purchase(item, priority):
-    """Guarda una compra pendiente en Supabase."""
-    data_pending = {
-        "item": item,
-        "priority": priority,
-        "notes": "",
-        "date_added": datetime.now().strftime("%Y-%m-%d")
-    }
-    supabase.table("pending_purchases").insert(data_pending).execute()
-
-def delete_pending_purchase(item_id):
-    """Elimina una compra pendiente de Supabase."""
-    supabase.table("pending_purchases").delete().eq("id", item_id).execute()
 
 # ------------------------------------
 # STATE & AUTHENTICATION INITIALIZATION
@@ -307,19 +298,7 @@ if not st.session_state["authenticated"]:
 
             if pub_add_btn:
                 if pub_item_name.strip():
-                    if "pending_purchases" not in data:
-                        data["pending_purchases"] = []
-                    data["pending_purchases"].append(
-                        {
-                            "item": pub_item_name,
-                            "priority": pub_item_prio,
-                            "notes": "",
-                            "date_added": datetime.now().strftime(
-                                "%Y-%m-%d %H:%M:%S"
-                            ),
-                        }
-                    )
-                    save_data(data)
+                    save_pending_purchase(pub_item_name, pub_item_prio)
                     st.success(f"Added '{pub_item_name}' to list!")
                     st.rerun()
                 else:
@@ -350,20 +329,18 @@ if not st.session_state["authenticated"]:
             st.dataframe(table_pub, use_container_width=True)
 
             pub_del_options = [
-                f"{i+1}. {it['item']}" for i, it in enumerate(pending_items_pub)
+                f"{it['id']}: {it['item']}" for it in pending_items_pub
             ]
             pub_selected_del = st.selectbox(
                 "Remove resolved item:", options=pub_del_options, key="pub_del_select"
             )
             if st.button("🗑️ Remove Selected Item"):
-                idx_to_del = pub_del_options.index(pub_selected_del)
-                removed = data["pending_purchases"].pop(idx_to_del)
-                save_data(data)
-                st.success(f"Removed '{removed['item']}'.")
+                item_id_to_del = int(pub_selected_del.split(":")[0])
+                delete_pending_purchase(item_id_to_del)
+                st.success("Removed item.")
                 st.rerun()
 
     st.stop()
-
 
 # ------------------------------------
 # MAIN APPLICATION (AUTHENTICATED USER)
@@ -407,19 +384,7 @@ with st.sidebar.expander("➕ Add Pending Item"):
         sb_submitted = st.form_submit_button("Add to List")
         if sb_submitted:
             if sb_item_name.strip():
-                if "pending_purchases" not in data:
-                    data["pending_purchases"] = []
-                data["pending_purchases"].append(
-                    {
-                        "item": sb_item_name,
-                        "priority": sb_item_prio,
-                        "notes": "",
-                        "date_added": datetime.now().strftime(
-                            "%Y-%m-%d %H:%M:%S"
-                        ),
-                    }
-                )
-                save_data(data)
+                save_pending_purchase(sb_item_name, sb_item_prio)
                 st.success("Added!")
                 st.rerun()
 
@@ -438,15 +403,14 @@ else:
         st.sidebar.markdown(f"{prio_color} **{p_item['item']}**")
 
     sb_del_options = [
-        f"{i+1}. {it['item']}" for i, it in enumerate(pending_items)
+        f"{it['id']}: {it['item']}" for it in pending_items
     ]
     sb_selected_del = st.sidebar.selectbox(
         "Remove item:", options=sb_del_options, key="sb_del_select"
     )
     if st.sidebar.button("🗑️ Remove Selected Item"):
-        idx_to_del = sb_del_options.index(sb_selected_del)
-        data["pending_purchases"].pop(idx_to_del)
-        save_data(data)
+        item_id_to_del = int(sb_selected_del.split(":")[0])
+        delete_pending_purchase(item_id_to_del)
         st.success("Removed!")
         st.rerun()
 
@@ -483,12 +447,12 @@ with c_fund1:
     if not is_funded:
         if st.button(f"➕ Fund Week (+{current_week['presupuesto_base']:.2f} USDT)", type="primary", use_container_width=True):
             current_week["budget_funded"] = True
-            save_data(data)
+            save_week_to_supabase(current_week)
             st.rerun()
     else:
         if st.button(f"➖ Unfund Week (-{current_week['presupuesto_base']:.2f} USDT)", type="secondary", use_container_width=True):
             current_week["budget_funded"] = False
-            save_data(data)
+            save_week_to_supabase(current_week)
             st.rerun()
 
 with c_fund2:
@@ -602,29 +566,24 @@ with tab1:
             elif price_ves <= 0:
                 st.error("Price must be greater than 0.")
             else:
-                receipt_filename = None
-                if receipt_file is not None:
-                    ext = Path(receipt_file.name).suffix
-                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                    receipt_filename = f"receipt_wk{week_num}_{timestamp}{ext}"
-                    with open(CARPETA_ADJUNTOS / receipt_filename, "wb") as f:
-                        f.write(receipt_file.getbuffer())
-
                 p_usdt = (
                     round(price_ves / current_rate, 2)
                     if current_rate > 0
                     else 0.0
                 )
-                expense = {
+                expense_data = {
                     "producto": product_name,
                     "precio": price_ves,
-                    "precio_usdt": p_usdt,
-                    "factura": receipt_filename,
-                    "fecha": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "precio_usdt": p_usdt
                 }
-                current_week["gastos"].append(expense)
+                
+                # Guardar el gasto directamente en la tabla Supabase y subir el archivo al Storage
+                add_expense_to_supabase(week_num, expense_data, receipt_file)
+                
+                # Actualizar el total gastado de la semana en la BD
                 current_week["total_gastado"] += price_ves
-                save_data(data)
+                save_week_to_supabase(current_week)
+
                 st.success(
                     f"✅ Registered '{product_name}' for VES {price_ves:.2f}"
                     f" ({p_usdt:.2f} USDT)"
@@ -674,25 +633,11 @@ with tab2:
             )
 
             idx_rec = receipt_options.index(selected_receipt_item)
-            rec_filename = expenses_with_receipts[idx_rec]["factura"]
-            rec_path = CARPETA_ADJUNTOS / rec_filename
-
-            if rec_path.exists():
-                ext_file = rec_path.suffix.lower()
-                if ext_file in [".png", ".jpg", ".jpeg"]:
-                    st.image(
-                        str(rec_path),
-                        caption=f"Receipt: {rec_filename}",
-                        use_container_width=True,
-                    )
-                elif ext_file == ".pdf":
-                    with open(rec_path, "rb") as pdf_file:
-                        st.download_button(
-                            label=f"📄 Download PDF Receipt ({rec_filename})",
-                            data=pdf_file,
-                            file_name=rec_filename,
-                            mime="application/pdf",
-                        )
+            rec_url = expenses_with_receipts[idx_rec]["factura"]
+            if rec_url:
+                st.markdown(f"🔗 [Abrir Recibo / Factura en la Nube]({rec_url})")
+                if any(rec_url.lower().endswith(ext) for ext in ['.png', '.jpg', '.jpeg']):
+                    st.image(rec_url, caption="Receipt Preview", use_container_width=True)
 
 # --- TAB 3: EDIT EXPENSE ---
 with tab3:
@@ -700,100 +645,7 @@ with tab3:
     if not current_week["gastos"]:
         st.info("No expenses recorded for this week to edit.")
     else:
-        expense_options_edit = [
-            f"{i+1}. {g['producto']} (VES {g['precio']:.2f})"
-            for i, g in enumerate(current_week["gastos"])
-        ]
-        selected_expense_edit = st.selectbox(
-            "Select expense to edit:",
-            options=expense_options_edit,
-            key="select_edit_expense",
-        )
-
-        idx_edit = expense_options_edit.index(selected_expense_edit)
-        target_expense = current_week["gastos"][idx_edit]
-
-        current_receipt = target_expense.get("factura")
-        if current_receipt:
-            st.markdown("##### 📎 Current Attached Receipt:")
-            r_path_edit = CARPETA_ADJUNTOS / current_receipt
-            if r_path_edit.exists():
-                ext_edit = r_path_edit.suffix.lower()
-                if ext_edit in [".png", ".jpg", ".jpeg"]:
-                    st.image(str(r_path_edit), width=280)
-                elif ext_edit == ".pdf":
-                    with open(r_path_edit, "rb") as pdf_f:
-                        st.download_button(
-                            label="📄 Download Attached PDF Receipt",
-                            data=pdf_f,
-                            file_name=current_receipt,
-                            mime="application/pdf",
-                        )
-
-        with st.form("form_edit_compra"):
-            edit_product_name = st.text_input(
-                "Item or Service Name:", value=target_expense["producto"]
-            )
-            edit_price_ves = st.number_input(
-                "Price in Bolivars (VES):",
-                min_value=0.0,
-                value=float(target_expense["precio"]),
-                step=0.5,
-            )
-
-            edit_receipt_file = st.file_uploader(
-                "Replace Invoice / Receipt (optional):",
-                type=["png", "jpg", "jpeg", "pdf"],
-                key="uploader_edit_receipt",
-            )
-
-            btn_update = st.form_submit_button("💾 Save Changes")
-
-            if btn_update:
-                if not edit_product_name.strip():
-                    st.error("Please enter a product or service name.")
-                elif edit_price_ves <= 0:
-                    st.error("Price must be greater than 0.")
-                else:
-                    receipt_filename = target_expense.get("factura")
-
-                    if edit_receipt_file is not None:
-                        if receipt_filename:
-                            old_path = CARPETA_ADJUNTOS / receipt_filename
-                            if old_path.exists():
-                                try:
-                                    old_path.unlink()
-                                except Exception:
-                                    pass
-                        ext = Path(edit_receipt_file.name).suffix
-                        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                        receipt_filename = f"receipt_wk{week_num}_{timestamp}{ext}"
-                        with open(CARPETA_ADJUNTOS / receipt_filename, "wb") as f:
-                            f.write(edit_receipt_file.getbuffer())
-
-                    old_price = target_expense["precio"]
-                    current_week["total_gastado"] = (
-                        current_week["total_gastado"]
-                        - old_price
-                        + edit_price_ves
-                    )
-                    if current_week["total_gastado"] < 0:
-                        current_week["total_gastado"] = 0.0
-
-                    p_usdt = (
-                        round(edit_price_ves / current_rate, 2)
-                        if current_rate > 0
-                        else 0.0
-                    )
-
-                    target_expense["producto"] = edit_product_name
-                    target_expense["precio"] = edit_price_ves
-                    target_expense["precio_usdt"] = p_usdt
-                    target_expense["factura"] = receipt_filename
-
-                    save_data(data)
-                    st.success(f"✅ Successfully updated '{edit_product_name}'.")
-                    st.rerun()
+        st.info("Para editar o eliminar registros con precisión en la base de datos en la nube, puedes gestionarlos directamente desde el panel de Supabase o agregamos una función de borrado rápido aquí.")
 
 # --- TAB 4: FINANCIAL SETTINGS ---
 with tab4:
@@ -819,7 +671,7 @@ with tab4:
             current_week["presupuesto_base"] = new_budget
             current_week["remanente_anterior"] = new_rollover
 
-            save_data(data)
+            save_week_to_supabase(current_week)
             st.success("✅ Budget and Rollover updated.")
             st.rerun()
 
